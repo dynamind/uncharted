@@ -208,9 +208,10 @@ the triangle + shrinks it proportionally when `room` is tight). The TIP is alway
   - **orthogonal → the axis-aligned final segment** (a chord would draw a diagonal arrow on an
     L-route): the segment from a baseline ≥10px back that's outside the target body
     (`Nodes.inBody`) and points inward; chord fallback if degenerate.
-`arrowHeading` returns the rendered edge length as `room`; the renderer **skips the arrow
-entirely when `room < ARROW_LEN`** (edge shorter than the glyph — no tiny/overrunning arrows
-on near-touching nodes), else draws it full size. 31 router tests.
+`arrowHeading` returns `room` = the straight **span between the rendered endpoints** (NOT the
+arc length — a bulging curve between near-touching nodes has a long arc but a tiny chord);
+the renderer **skips the arrow entirely when `room < ARROW_LEN`** (edge shorter than the glyph
+— no tiny/overrunning arrows on near-touching nodes), else draws it full size. 31 router tests.
 
 The `layered` solver places a node in one layer per longest-path rank, but an edge that
 spans more than one layer is drawn as a single long line straight across the intervening

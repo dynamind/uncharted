@@ -363,14 +363,17 @@ describe("arrowHeading is robust near touching / overlapping nodes", () => {
   // `room` is the rendered edge length; the renderer skips the glyph when it's
   // shorter than the arrow (ARROW_LEN=11), so the arrow never overruns a short edge.
   it("reports room so the renderer can skip arrows on edges shorter than the glyph", () => {
-    const room = (centreGap) => {
+    const room = (mode, centreGap) => {
       const n = [{ x: 200, y: 200, id: 0 }, { x: 200 + centreGap, y: 200, id: 1 }];   // circles, R=8
-      const poly = edgeGeometry({ nodes: n, edges: [{ source: 0, target: 1 }] }, "straight",
+      const poly = edgeGeometry({ nodes: n, edges: [{ source: 0, target: 1 }] }, mode,
         { x0: 0, y0: 0, x1: 600, y1: 600 })[0].poly;
-      return arrowHeading(poly, n[0], n[1], "straight")?.room ?? 0;
+      return arrowHeading(poly, n[0], n[1], mode)?.room ?? 0;
     };
-    expect(room(40)).toBeGreaterThanOrEqual(11);   // border-to-border 24px → drawn
-    expect(room(20)).toBeLessThan(11);             // border-to-border 4px → skipped
+    expect(room("straight", 40)).toBeGreaterThanOrEqual(11);   // border-to-border 24px → drawn
+    expect(room("straight", 20)).toBeLessThan(11);             // border-to-border 4px → skipped
+    // curved: room is the endpoint SPAN, not the (bulging) arc length — so a curve
+    // between near-touching nodes still reads as short and gets skipped.
+    expect(room("curved", 26)).toBeLessThan(11);               // chord ~10px though arc ~36px
   });
 
   it("returns null when the nodes coincide (no room → no glyph)", () => {

@@ -439,8 +439,9 @@ export function separateLanes(geoms) {
 /* ---- arrowhead heading --------------------------------------------------- */
 // Direction for a directed arrowhead at the TARGET end of a rendered polyline.
 // Returns { tx, ty (tip on the border, kept glued to the line end), ux, uy (unit
-// heading INTO the target), room (total polyline length) } — or null when there's
-// no room (nodes on top of each other).
+// heading INTO the target), room (the straight SPAN between the rendered endpoints
+// — the visible "edge length", NOT the arc length, so a bulging curve between two
+// near-touching nodes correctly reads as short) } — or null when there's no room.
 //
 // The TIP is always poly[last] (on the border, on the drawn line). The HEADING is
 // where it gets subtle near touching/overlapping nodes:
@@ -453,10 +454,8 @@ export function separateLanes(geoms) {
 //     arrow on an L-route). Take it from a baseline ≥ minBase back that's outside
 //     the target body and points inward; fall back to the chord if degenerate.
 export function arrowHeading(poly, source, target, mode, minBase = 10) {
-  const tip = poly[poly.length - 1];
-  let room = 0;
-  for (let i = 1; i < poly.length; i++)
-    room += Math.hypot(poly[i].x - poly[i-1].x, poly[i].y - poly[i-1].y);
+  const tip = poly[poly.length - 1], first = poly[0];
+  const room = Math.hypot(tip.x - first.x, tip.y - first.y);   // endpoint span, not arc length
   if (room < 5) return null;
   let ux = 0, uy = 0;
   if (mode === "orthogonal") {
