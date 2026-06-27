@@ -945,14 +945,13 @@ const Renderer = (() => {
   const ARROW_LEN = 11, ARROW_HALF = 4.5;
   function drawArrowhead(ctx, poly, source, target, mode) {
     const h = arrowHeading(poly, source, target, mode);
-    if (!h) return;
-    const len = Math.min(ARROW_LEN, h.room), half = ARROW_HALF * (len / ARROW_LEN);
-    const bx = h.tx - h.ux*len, by = h.ty - h.uy*len;   // base centre, a radius back up the line
+    if (!h || h.room < ARROW_LEN) return;               // edge shorter than the glyph → skip it
+    const bx = h.tx - h.ux*ARROW_LEN, by = h.ty - h.uy*ARROW_LEN;   // base centre, a radius back up the line
     const nx = -h.uy, ny = h.ux;                        // perpendicular
     ctx.beginPath();
     ctx.moveTo(h.tx, h.ty);
-    ctx.lineTo(bx + nx*half, by + ny*half);
-    ctx.lineTo(bx - nx*half, by - ny*half);
+    ctx.lineTo(bx + nx*ARROW_HALF, by + ny*ARROW_HALF);
+    ctx.lineTo(bx - nx*ARROW_HALF, by - ny*ARROW_HALF);
     ctx.closePath();
     ctx.fill();
   }
