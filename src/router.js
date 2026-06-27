@@ -436,6 +436,42 @@ export function separateLanes(geoms) {
   return geoms;
 }
 
+/* ---- arrowhead heading --------------------------------------------------- */
+// Direction for a directed arrowhead at the TARGET end of a rendered polyline.
+// Returns { tx, ty (tip on the border), ux, uy (unit heading INTO the target),
+// room (total polyline length) } — or null when there's no room (nodes on top of
+// each other). Robust near touching/overlapping nodes, where the naive
+// "poly[last] − poly[last-1]" both jitters (a ~1px baseline → unstable angle) and
+// flips backward (a curved tail can dip inside the target, and the attach point
+// rotates around it as the chord angle changes):
+//   • take the tangent from a baseline that is BOTH ≥ minBase back (stable angle)
+//     AND outside the target body (can't be flipped by an inside-the-node tail);
+//   • use it only if it actually points inward;
+//   • otherwise fall back to the source→target CENTRE chord, which always points
+//     into the target and never flips.
+export function arrowHeading(poly, source, target, minBase = 10) {
+  const tip = poly[poly.length - 1];
+  let room = 0;
+  for (let i = 1; i < poly.length; i++)
+    room += Math.hypot(poly[i].x - poly[i-1].x, poly[i].y - poly[i-1].y);
+  if (room < 5) return null;
+  let ux = 0, uy = 0, acc = 0;
+  for (let i = poly.length - 2; i >= 0; i--) {
+    acc += Math.hypot(poly[i+1].x - poly[i].x, poly[i+1].y - poly[i].y);
+    if (acc >= minBase && !(target && Nodes.inBody(target, poly[i].x, poly[i].y))) {
+      const dx = tip.x - poly[i].x, dy = tip.y - poly[i].y, L = Math.hypot(dx, dy);
+      if (L > 1e-3 && target && dx*(target.x - tip.x) + dy*(target.y - tip.y) > 0) { ux = dx/L; uy = dy/L; }
+      break;                                            // tried the best baseline; chord otherwise
+    }
+  }
+  if (ux === 0 && uy === 0) {                           // centre-chord fallback (always inward)
+    const dx = target.x - source.x, dy = target.y - source.y, L = Math.hypot(dx, dy);
+    if (L < 1e-3) return null;
+    ux = dx/L; uy = dy/L;
+  }
+  return { tx: tip.x, ty: tip.y, ux, uy, room };
+}
+
 /* ---- routing dispatch (straight | curved | orthogonal) ------------------- */
 export function edgeGeometry(graph, mode, bounds, prev) {
   if (mode === "orthogonal") return orthogonalGeometry(graph, bounds, prev);

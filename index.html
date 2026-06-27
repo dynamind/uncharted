@@ -284,7 +284,7 @@
    ./src/router.js (see test/router.test.js); everything else (presets,
    objective, solvers, renderer, controller) stays here.
    ========================================================================== */
-import { Geo, Nodes, ORTHO, edgeGeometry } from "./src/router.js";
+import { Geo, Nodes, ORTHO, edgeGeometry, arrowHeading } from "./src/router.js";
 
 /* ---------------------------------------------------------------------------
    2. Graph model + presets
@@ -934,36 +934,25 @@ const Renderer = (() => {
     // border (its tip kisses the border; the body points back along the edge).
     if (opts.arrows) {
       ctx.fillStyle = getCss("--edge");
-      for (let i = 0; i < geom.length; i++) drawArrowhead(ctx, geom[i].poly, geom[i].b);
+      for (let i = 0; i < geom.length; i++) drawArrowhead(ctx, geom[i].poly, geom[i].a, geom[i].b);
     }
   }
 
-  // Directed glyph at the TARGET end (poly[last], already on the node border).
-  // Heading = the final segment's direction (a point ARROW_LEN back up the line is
-  // the triangle's base; the tip stays on the border). On SHORT/curved edges the
-  // bezier's last sample can land INSIDE the target node — then poly[last-1] points
-  // the triangle backward over the node, so when the tail vertex is inside the body
-  // we walk further back to the first vertex outside it. Orthogonal/straight tails
-  // stay outside the target, so they keep the clean final-segment axis (we must not
-  // walk past a near-target corner). separateLanes never touches the port stub.
+  // Directed glyph at the TARGET end. The robust heading (stable near touching /
+  // overlapping nodes — no jitter, no backward flip) lives in router.arrowHeading;
+  // here we just draw the filled triangle, shrinking it proportionally when the
+  // edge is too short to fit the full glyph.
   const ARROW_LEN = 11, ARROW_HALF = 4.5;
-  function drawArrowhead(ctx, poly, target) {
-    const tip = poly[poly.length - 1];
-    let ref = poly[poly.length - 2];
-    if (target && Nodes.inBody(target, ref.x, ref.y)) {
-      ref = poly[0];                                  // fallback: whole edge as baseline
-      for (let i = poly.length - 3; i >= 0; i--)
-        if (!Nodes.inBody(target, poly[i].x, poly[i].y)) { ref = poly[i]; break; }
-    }
-    const dx = tip.x - ref.x, dy = tip.y - ref.y, L = Math.hypot(dx, dy);
-    if (L < 1e-3) return;
-    const ux = dx/L, uy = dy/L;                       // unit heading into the target
-    const bx = tip.x - ux*ARROW_LEN, by = tip.y - uy*ARROW_LEN;   // base centre, radius n back
-    const nx = -uy, ny = ux;                          // perpendicular
+  function drawArrowhead(ctx, poly, source, target) {
+    const h = arrowHeading(poly, source, target);
+    if (!h) return;
+    const len = Math.min(ARROW_LEN, h.room), half = ARROW_HALF * (len / ARROW_LEN);
+    const bx = h.tx - h.ux*len, by = h.ty - h.uy*len;   // base centre, a radius back up the line
+    const nx = -h.uy, ny = h.ux;                        // perpendicular
     ctx.beginPath();
-    ctx.moveTo(tip.x, tip.y);
-    ctx.lineTo(bx + nx*ARROW_HALF, by + ny*ARROW_HALF);
-    ctx.lineTo(bx - nx*ARROW_HALF, by - ny*ARROW_HALF);
+    ctx.moveTo(h.tx, h.ty);
+    ctx.lineTo(bx + nx*half, by + ny*half);
+    ctx.lineTo(bx - nx*half, by - ny*half);
     ctx.closePath();
     ctx.fill();
   }

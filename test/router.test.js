@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { orthogonalGeometry, bendCount, Nodes, separateLanes, edgeGeometry } from "../src/router.js";
+import { orthogonalGeometry, bendCount, Nodes, separateLanes, edgeGeometry, arrowHeading } from "../src/router.js";
 
 // --- helpers ---------------------------------------------------------------
 const rect = (x, y, w = 98, h = 40) => ({ x, y, w, h, shape: "rect" });
@@ -306,27 +306,48 @@ describe("Nodes.inBody — point-in-shape", () => {
   });
 });
 
-// Regression for the arrowhead "triangle pointing back over the leaf" bug: on a
-// SHORT curved edge the bezier's last sample lands inside the target node, so the
-// naive poly[last]-poly[last-1] heading points outward. The fix walks back to the
-// first vertex outside the body; mirror that here and assert the heading is inward.
-describe("arrowhead heading stays inward on short curved edges", () => {
-  const headingTowardCentre = (gap) => {
-    const nodes = [{ x: 300, y: 100, id: 0 }, { x: 320, y: 100 + gap, id: 1 }];
-    const poly = edgeGeometry({ nodes, edges: [{ source: 0, target: 1 }] }, "curved",
+// arrowHeading must (1) always point INTO the target — never flip backward over
+// the node, even as nodes are dragged into contact/overlap — and (2) stay stable
+// (no jitter from a ~1px baseline). It bottomed out as two bugs: a short curved
+// edge whose bezier tail dips inside the target, and a near-1px baseline whose
+// atan2 spins. Sweep all three routings down through touching/overlapping.
+describe("arrowHeading is robust near touching / overlapping nodes", () => {
+  const headAt = (mode, gap) => {
+    const rectish = mode === "orthogonal";
+    const mk = (x, y, id) => rectish ? { x, y, w: 70, h: 34, shape: "rect", id } : { x, y, id };
+    const nodes = [mk(300, 100, 0), mk(308, 100 + gap, 1)];
+    const poly = edgeGeometry({ nodes, edges: [{ source: 0, target: 1 }] }, mode,
       { x0: 0, y0: 0, x1: 600, y1: 600 })[0].poly;
-    const b = nodes[1], tip = poly[poly.length - 1];
-    let ref = poly[poly.length - 2];
-    if (Nodes.inBody(b, ref.x, ref.y)) {
-      ref = poly[0];
-      for (let i = poly.length - 3; i >= 0; i--)
-        if (!Nodes.inBody(b, poly[i].x, poly[i].y)) { ref = poly[i]; break; }
-    }
-    // dot of heading with (tip -> centre) must be positive (points into the node)
-    return (tip.x - ref.x) * (b.x - tip.x) + (tip.y - ref.y) * (b.y - tip.y) > 0;
+    return { h: arrowHeading(poly, nodes[0], nodes[1]), b: nodes[1] };
   };
-  it("points into the target across long and short edges alike", () => {
-    for (const gap of [200, 120, 90, 50, 30, 20]) expect(headingTowardCentre(gap)).toBe(true);
+
+  it("never points outward, for any routing, all the way into overlap", () => {
+    const bad = [];
+    for (const mode of ["curved", "straight", "orthogonal"]) {
+      for (let gap = 200; gap >= 4; gap -= 2) {
+        const { h, b } = headAt(mode, gap);
+        if (!h) continue;                              // skipped (no room) is fine
+        const inward = h.ux * (b.x - h.tx) + h.uy * (b.y - h.ty) > 0;
+        if (!inward) bad.push({ mode, gap });
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it("returns null when the nodes coincide (no room → no glyph)", () => {
+    const n = [{ x: 300, y: 300, id: 0 }, { x: 300, y: 300, id: 1 }];
+    const poly = edgeGeometry({ nodes: n, edges: [{ source: 0, target: 1 }] }, "straight",
+      { x0: 0, y0: 0, x1: 600, y1: 600 })[0].poly;
+    expect(arrowHeading(poly, n[0], n[1])).toBe(null);
+  });
+
+  it("uses a stable, non-degenerate baseline on a normal edge (heading is unit)", () => {
+    const n = [{ x: 200, y: 200, id: 0 }, { x: 500, y: 360, id: 1 }];
+    const poly = edgeGeometry({ nodes: n, edges: [{ source: 0, target: 1 }] }, "curved",
+      { x0: 0, y0: 0, x1: 800, y1: 800 })[0].poly;
+    const h = arrowHeading(poly, n[0], n[1]);
+    expect(Math.hypot(h.ux, h.uy)).toBeCloseTo(1, 6);
+    expect(h.ux * (n[1].x - h.tx) + h.uy * (n[1].y - h.ty)).toBeGreaterThan(0);
   });
 });
 
