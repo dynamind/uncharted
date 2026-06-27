@@ -185,6 +185,8 @@
           <option value="force">Force-directed · Fruchterman–Reingold</option>
           <option value="annealing">Simulated annealing · Davidson–Harel</option>
           <option value="hillclimb">Hill climbing · greedy local search</option>
+          <option value="layered">Layered · Sugiyama (Dagre / ELK family)</option>
+          <option value="circular">Circular · ring baseline</option>
         </select>
         <select id="sel-graph" title="Graph">
         </select>
@@ -625,6 +627,108 @@ function makeAnnealer(greedy) {
 LayoutEngine.register("annealing", makeAnnealer(false));
 LayoutEngine.register("hillclimb", makeAnnealer(true));
 
+/* --- Constructive solvers: compute target positions, then tween into place.
+   These mirror how a batch backend (Dagre, ELK) works — structure first, the
+   facade just animates the result. --- */
+function makeConstructive(name, computeTargets) {
+  return (graph, bounds, params) => {
+    const targets = computeTargets(graph, bounds, params);
+    let iter = 0, settled = false;
+    return {
+      name,
+      get done() { return settled; },
+      get iter() { return iter; },
+      step() {
+        iter++;
+        let maxd = 0;
+        const ns = graph.nodes;
+        for (let i = 0; i < ns.length; i++) {
+          const n = ns[i], t = targets[i];
+          if (n.fixed || !t) continue;
+          n.x += (t.x - n.x) * 0.14;          // ease toward target
+          n.y += (t.y - n.y) * 0.14;
+          maxd = Math.max(maxd, Math.abs(t.x - n.x) + Math.abs(t.y - n.y));
+        }
+        if (maxd < 0.5) settled = true;
+      },
+    };
+  };
+}
+
+// Circular: BFS order around a ring (adjacency-friendly, fewer crossings than id order).
+function circularTargets(graph, bounds) {
+  const { nodes, edges } = graph;
+  const adj = nodes.map(() => []);
+  edges.forEach(e => { adj[e.source].push(e.target); adj[e.target].push(e.source); });
+  const order = [], seen = new Array(nodes.length).fill(false);
+  for (let s = 0; s < nodes.length; s++) {
+    if (seen[s]) continue;
+    seen[s] = true; const q = [s];
+    while (q.length) { const u = q.shift(); order.push(u);
+      for (const v of adj[u]) if (!seen[v]) { seen[v] = true; q.push(v); } }
+  }
+  const cx = (bounds.x0+bounds.x1)/2, cy = (bounds.y0+bounds.y1)/2;
+  const R = Math.min(bounds.x1-bounds.x0, bounds.y1-bounds.y0) * 0.42;
+  const t = new Array(nodes.length);
+  order.forEach((id, idx) => {
+    const a = idx / order.length * Math.PI*2 - Math.PI/2;
+    t[id] = { x: cx + Math.cos(a)*R, y: cy + Math.sin(a)*R };
+  });
+  return t;
+}
+
+// Layered (Sugiyama-lite): BFS layering + barycentre crossing reduction.
+// The Dagre / ELK-family approach, distilled to its three classic phases.
+function layeredTargets(graph, bounds) {
+  const { nodes, edges } = graph;
+  const adj = nodes.map(() => []);
+  edges.forEach(e => { adj[e.source].push(e.target); adj[e.target].push(e.source); });
+
+  // 1. layer assignment — BFS depth from the highest-degree root (per component)
+  let root = 0, bd = -1;
+  for (let i = 0; i < nodes.length; i++) if (adj[i].length > bd) { bd = adj[i].length; root = i; }
+  const layer = new Array(nodes.length).fill(-1);
+  for (let s = 0; s < nodes.length; s++) {
+    const start = s === 0 ? root : s;
+    if (layer[start] >= 0) continue;
+    layer[start] = 0; const q = [start];
+    while (q.length) { const u = q.shift();
+      for (const v of adj[u]) if (layer[v] < 0) { layer[v] = layer[u] + 1; q.push(v); } }
+  }
+  let maxL = 0; for (const l of layer) maxL = Math.max(maxL, l);
+  const order = []; for (let l = 0; l <= maxL; l++) order.push([]);
+  for (let i = 0; i < nodes.length; i++) order[layer[i]].push(i);
+
+  // 2. crossing reduction — repeated barycentre sweeps, down then up
+  const posOf = () => { const p = new Array(nodes.length);
+    order.forEach(a => a.forEach((id, idx) => p[id] = idx)); return p; };
+  const bary = (id, nl, p) => { let s = 0, c = 0;
+    for (const v of adj[id]) if (layer[v] === nl) { s += p[v]; c++; }
+    return c ? s / c : p[id]; };
+  for (let sweep = 0; sweep < 10; sweep++) {
+    let p = posOf();
+    for (let l = 1; l <= maxL; l++) order[l].sort((a, b) => bary(a, l-1, p) - bary(b, l-1, p));
+    p = posOf();
+    for (let l = maxL-1; l >= 0; l--) order[l].sort((a, b) => bary(a, l+1, p) - bary(b, l+1, p));
+  }
+
+  // 3. coordinate assignment — layer -> y, position-in-layer -> x
+  const W = bounds.x1 - bounds.x0, H = bounds.y1 - bounds.y0;
+  const t = new Array(nodes.length);
+  for (let l = 0; l <= maxL; l++) {
+    const arr = order[l], n = arr.length;
+    const y = bounds.y0 + (maxL === 0 ? H/2 : H * l / maxL);
+    arr.forEach((id, idx) => {
+      const x = bounds.x0 + (n === 1 ? W/2 : W * idx / (n - 1));
+      t[id] = { x, y };
+    });
+  }
+  return t;
+}
+
+LayoutEngine.register("layered",  makeConstructive("layered",  layeredTargets));
+LayoutEngine.register("circular", makeConstructive("circular", circularTargets));
+
 /* ---------------------------------------------------------------------------
    4. Renderer
    ------------------------------------------------------------------------- */
@@ -938,9 +1042,10 @@ const App = (() => {
 
   // Show only the parameters relevant to the active solver.
   function updateSolverUI() {
-    const isForce = state.solverName === "force";
-    document.getElementById("params-force").style.display = isForce ? "" : "none";
-    document.getElementById("params-meta").style.display  = isForce ? "none" : "";
+    const s = state.solverName;
+    const isMeta = s === "annealing" || s === "hillclimb";
+    document.getElementById("params-force").style.display = s === "force" ? "" : "none";
+    document.getElementById("params-meta").style.display  = isMeta ? "" : "none";
   }
 
   function init() {
