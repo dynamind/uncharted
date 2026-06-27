@@ -1110,13 +1110,23 @@ function orthogonalGeometry(graph, bounds) {
     return path.reverse();
   }
 
-  // Which side of n faces `toward`: top/bottom for cross-layer (flowchart flow),
-  // left/right for same-layer edges.
+  // Choose the side each endpoint uses, from the GAPS between the box edges (not
+  // the centres). Top/bottom only when the boxes actually clear each other
+  // vertically; if they overlap vertically but sit side-by-side, use the near
+  // left/right sides — otherwise a still-higher centre would force a big S. A
+  // vertical clearance wins ties so genuinely stacked flowchart edges flow down.
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-  const sideOf = (n, toward) => {
-    const dx = toward.x - n.x, dy = toward.y - n.y;
-    return Math.abs(dy) > 6 ? (dy > 0 ? "b" : "t") : (dx >= 0 ? "r" : "l");
-  };
+  function sidesForEdge(a, b) {
+    const ah = Nodes.half(a), bh = Nodes.half(b);
+    const vGap = Math.max((b.y - bh.hh) - (a.y + ah.hh), (a.y - ah.hh) - (b.y + bh.hh));
+    const hGap = Math.max((b.x - bh.hw) - (a.x + ah.hw), (a.x - ah.hw) - (b.x + bh.hw));
+    let vertical;
+    if (vGap >= 0) vertical = true;          // clear vertically → flow up/down
+    else if (hGap >= 0) vertical = false;    // overlap vertically, clear sideways → use sides
+    else vertical = vGap >= hGap;            // overlap both → least-overlapping axis
+    if (vertical) return a.y <= b.y ? ["b", "t"] : ["t", "b"];
+    return a.x <= b.x ? ["r", "l"] : ["l", "r"];
+  }
 
   // Pre-assign every edge an attach OFFSET along the node side it uses. Each edge
   // leans toward its own endpoint, then edges sharing a side are de-collided so
@@ -1124,10 +1134,11 @@ function orthogonalGeometry(graph, bounds) {
   // point (which looked like a single line skewering the box). A side with one
   // edge stays centred. Trunk children sit at offset 0 → dead-straight.
   const SEP = ORTHO.cell + 6;
-  const offAt = new Map();                          // edgeIndex*2 + endpoint → offset
+  const offAt = new Map(), sideAt = new Map();      // edgeIndex*2 + endpoint → offset / side
   {
     const groups = new Map();                       // nodeIdx + ":" + side → records
     const add = (ni, side, key, n, other) => {
+      sideAt.set(key, side);
       const { hw, hh } = Nodes.half(n);
       const along = (side === "t" || side === "b") ? hw : hh;
       const axis  = (side === "t" || side === "b") ? other.x - n.x : other.y - n.y;
@@ -1138,8 +1149,9 @@ function orthogonalGeometry(graph, bounds) {
     };
     edges.forEach((e, ei) => {
       const a = nodes[e.source], b = nodes[e.target];
-      add(e.source, sideOf(a, b), ei*2,   a, b);
-      add(e.target, sideOf(b, a), ei*2+1, b, a);
+      const [sa, sb] = sidesForEdge(a, b);
+      add(e.source, sa, ei*2,   a, b);
+      add(e.target, sb, ei*2+1, b, a);
     });
     for (const arr of groups.values()) {
       if (arr.length === 1) { offAt.set(arr[0].key, 0); continue; }   // single → centred
@@ -1164,11 +1176,11 @@ function orthogonalGeometry(graph, bounds) {
     if (shape === "circle")  return Math.sqrt(Math.max(0, perp*perp - off*off));
     return perp;                                   // rect
   }
-  // A port: where the edge meets the node, using its pre-assigned offset.
-  function port(n, key, toward) {
+  // A port: where the edge meets the node, using its pre-assigned side + offset.
+  function port(n, key) {
     const { hw, hh } = Nodes.half(n);
     const shape = n.shape || "circle";
-    const side = sideOf(n, toward), off = offAt.get(key) || 0;
+    const side = sideAt.get(key), off = offAt.get(key) || 0;
     if (side === "t" || side === "b") {
       const px = wx(gx(n.x + off));
       const by = borderPerp(shape, px - n.x, hw, hh);   // border height at this x
@@ -1208,7 +1220,7 @@ function orthogonalGeometry(graph, bounds) {
 
   return edges.map((e, ei) => {
     const a = nodes[e.source], b = nodes[e.target];
-    const pa = port(a, ei*2, b), pb = port(b, ei*2+1, a);
+    const pa = port(a, ei*2), pb = port(b, ei*2+1);
     const oa = outer(pa), ob = outer(pb);
     let poly;
     const path = oa && ob ? astar(oa.c, oa.r, ob.c, ob.r) : null;

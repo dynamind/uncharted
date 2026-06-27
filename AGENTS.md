@@ -40,8 +40,12 @@ attack it.
   per-edge rendered polylines. Modes: `straight | curved | orthogonal`. Orthogonal is
   grid **A\*** (turn-penalised) around node obstacles (+margin), connected via axis-
   aligned **ports** (route between points *outside* the boxes — never let the jog
-  happen inside a box, or the endpoint clip turns it into a diagonal). Ports prefer
-  **top/bottom** for cross-layer edges (flowchart flow) and **lean** toward the other
+  happen inside a box, or the endpoint clip turns it into a diagonal). Side choice
+  (`sidesForEdge`) is driven by the **gaps between box edges**, not centres: top/bottom
+  only when the boxes truly clear each other vertically; if they overlap vertically but
+  sit side-by-side, the near left/right sides are used (a still-higher *centre* would
+  otherwise force a needless S). Vertical clearance wins ties so stacked flowchart edges
+  flow down. Ports also **lean** toward the other
   endpoint, then **de-collided per node-side** (`offAt` map): edges sharing a side are
   spread to distinct slots (min SEP), single-edge sides stay centred, trunk children
   sit at offset 0. Without this, dragging a node so two of its edges share a side made
