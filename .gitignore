@@ -6,6 +6,10 @@
 .idea/
 *.swp
 
+# Node / Vite
+node_modules/
+dist/
+
 # Claude workspace
 .claude/
 scratchpad/

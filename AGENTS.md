@@ -15,12 +15,26 @@ solvers themselves* — graph layout as a combinatorial optimization problem
 (minimize edge crossings, edge length, node overlap) and the metaheuristics that
 attack it.
 
+## Build / dev / test (Vite + Vitest)
+
+The project is now a small **Vite** app so the routing logic can be unit-tested.
+- `npm install` once. `npm run dev` (Vite dev server) for live work; `npm test`
+  (Vitest) runs `test/*.test.js`; `npm run build` emits **`dist/index.html`**.
+- **The single-file requirement still holds**: `vite-plugin-singlefile` inlines the
+  whole module graph, so `dist/index.html` is self-contained and opens from `file://`.
+  Verify after routing changes: `npm run build` then `grep -c '<script src' dist/index.html`
+  must be 0. The committed root `index.html` is the Vite *entry* (imports `./src/router.js`)
+  and won't run directly from `file://` — that's expected; ship the built `dist/index.html`.
+- `src/router.js` is **pure / DOM-free** (Geo, Nodes, ORTHO, sidesForEdge,
+  orthogonalGeometry, edgeGeometry). Everything else stays inline in `index.html`'s
+  `<script type="module">`. Keep the router pure so the tests stay fast and trustworthy.
+
 ## Hard requirements (from the user, do not regress)
 
-- **Single self-contained HTML file.** No external scripts, fonts, or assets.
-  Everything inline. Must work from `file://`.
+- **Self-contained single-file deliverable** (`dist/index.html`). No external scripts,
+  fonts, or assets at runtime; opens from `file://`.
 - **Dark color palette**, with a **subtle dot-grid background**.
-- Edges are **curved** (physics-y, pleasant). The user explicitly enjoys nice curves.
+- Edges are **curved** (physics-y, pleasant) by default; orthogonal for flowcharts.
 - **Line crossings are drawn as small hops** (line-jumps / bridges).
 - Git from the start; **focused commits** that tell the story of the build.
 
@@ -41,11 +55,14 @@ attack it.
   grid **A\*** (turn-penalised) around node obstacles (+margin), connected via axis-
   aligned **ports** (route between points *outside* the boxes — never let the jog
   happen inside a box, or the endpoint clip turns it into a diagonal). Side choice
-  (`sidesForEdge`) is driven by the **gaps between box edges**, not centres: top/bottom
-  only when the boxes truly clear each other vertically; if they overlap vertically but
-  sit side-by-side, the near left/right sides are used (a still-higher *centre* would
-  otherwise force a needless S). Vertical clearance wins ties so stacked flowchart edges
-  flow down. Ports also **lean** toward the other
+  (`sidesForEdge`, exported + tested) is driven by the **gaps between box edges widened
+  by the routing margin**, not centres: top/bottom only when a clean vertical channel
+  exists (`vGap >= 2*margin + cell`); if the boxes overlap vertically but sit
+  side-by-side, the near left/right sides are used (a still-higher *centre*, or a gap
+  smaller than the margins, would otherwise force a needless S — this is the bug the
+  margin term fixes). Vertical clearance wins ties so stacked flowchart edges flow down.
+  See `test/router.test.js` for the exact expected ports/bends per scenario. Ports also
+  **lean** toward the other
   endpoint, then **de-collided per node-side** (`offAt` map): edges sharing a side are
   spread to distinct slots (min SEP), single-edge sides stay centred, trunk children
   sit at offset 0. Without this, dragging a node so two of its edges share a side made

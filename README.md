@@ -1,8 +1,20 @@
 # Uncharted — a graph-layout solver lab
 
 An educational, self-contained tech-demo of **graph layout as combinatorial
-optimization**. Open [`index.html`](index.html) in any browser — no build, no
-server, no network.
+optimization**.
+
+```bash
+npm install
+npm run dev      # live dev server (Vite)
+npm test         # unit tests for the edge router (Vitest)
+npm run build    # → dist/index.html, a single self-contained file (opens from file://)
+```
+
+The deliverable is still **one self-contained HTML file** — `npm run build` inlines
+everything into `dist/index.html` via `vite-plugin-singlefile`. The pure, DOM-free
+edge-routing logic lives in [`src/router.js`](src/router.js) and is unit-tested in
+[`test/router.test.js`](test/router.test.js); the rest of the app is inline in
+[`index.html`](index.html).
 
 Graph drawing is a surprisingly deep problem: you want few edge crossings, short
 edges, no overlapping nodes, and a balanced picture — objectives that fight each
