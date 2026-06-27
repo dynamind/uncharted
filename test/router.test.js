@@ -386,6 +386,44 @@ describe("arrowHeading is robust near touching / overlapping nodes", () => {
     expect(room("curved", 26)).toBeLessThan(11);               // chord ~10px though arc ~36px
   });
 
+  // THE test that actually matters: across a full sweep of angles, distances and
+  // both bulge directions, the curved arrow must track the curve's TRUE arrival
+  // tangent — computed independently from the quadratic's control point (the math
+  // of the drawn curve), not from arrowHeading itself. This is what makes the arrow
+  // look like the head of the line; a hand-picked angle-vs-chord check never proved it.
+  it("curved arrow tracks the curve's true arrival tangent at every angle/length", () => {
+    // mirror edgeGeometry's curved control point → tangent at the target (t=1)
+    const arrivalTangent = (a, b, i) => {
+      const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
+      const dx = b.x-a.x, dy = b.y-a.y, len = Math.hypot(dx, dy) || 1;
+      const off = Math.min(34, len*0.11) * ((i % 2) ? 1 : -1);
+      const c = { x: mx - dy/len*off, y: my + dx/len*off };
+      const tx = b.x - c.x, ty = b.y - c.y, L = Math.hypot(tx, ty);
+      return { x: tx/L, y: ty/L };
+    };
+    const offenders = [];
+    for (const dist of [30, 45, 70, 120, 200, 320]) {
+      for (let deg = 0; deg < 360; deg += 15) {
+        for (const i of [0, 1]) {                       // edge parity flips the bulge
+          const r = deg * Math.PI / 180;
+          const a = { x: 400, y: 400, id: 0 };
+          const b = { x: 400 + dist*Math.cos(r), y: 400 + dist*Math.sin(r), id: 1 };
+          const edges = i === 0 ? [{ source: 0, target: 1 }]
+                                : [{ source: 0, target: 1 }, { source: 0, target: 1 }];
+          const g = edgeGeometry({ nodes: [a, b], edges }, "curved", { x0: 0, y0: 0, x1: 800, y1: 800 })[i];
+          const h = arrowHeading(g.poly, a, b, "curved");
+          if (!h) continue;                             // skipped (too short) is fine
+          const tip = g.poly[g.poly.length - 1];
+          const onBorder = Math.abs(Math.hypot(tip.x - b.x, tip.y - b.y) - Nodes.R) < 1.5;
+          const T = arrivalTangent(a, b, i);
+          const devDeg = Math.acos(Math.max(-1, Math.min(1, h.ux*T.x + h.uy*T.y))) * 180 / Math.PI;
+          if (!onBorder || devDeg > 18) offenders.push({ dist, deg, i, devDeg: Math.round(devDeg), onBorder });
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
   it("returns null when the nodes coincide (no room → no glyph)", () => {
     const n = [{ x: 300, y: 300, id: 0 }, { x: 300, y: 300, id: 1 }];
     const poly = edgeGeometry({ nodes: n, edges: [{ source: 0, target: 1 }] }, "straight",
