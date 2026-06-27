@@ -23,16 +23,20 @@ describe("side-by-side boxes (the reported scenario)", () => {
     expect(bendCount(g.poly)).toBe(0);
   });
 
-  it("small Y offset (boxes overlap incl. margin) → right/left, 2 bends", () => {
-    for (const dy of [10, 24, 40, 60]) {
+  it("small Y offset, still overlapping vertically → side-to-side, 2 bends", () => {
+    for (const dy of [10, 24, 36]) {        // vGap < 0 ⇒ level boxes ⇒ enter the side
       const g = edge(rect(200, 300), rect(500, 300 + dy));
       expect(g.sides).toEqual(["r", "l"]);
       expect(bendCount(g.poly)).toBe(2);
     }
   });
 
-  it("once the boxes clear vertically → bottom/top (flow downward)", () => {
-    expect(edge(rect(200, 300), rect(500, 560)).sides).toEqual(["b", "t"]);
+  // Issue 1: once B clears vertically AND sits off to the side, a 1-bend L
+  // (source's side → target's top) beats the 2-bend bottom→top S.
+  it("B below and off to the side → side-of-A to top-of-B, 1 bend", () => {
+    const g = edge(rect(200, 300), rect(500, 560));   // far right, clearly below
+    expect(g.sides).toEqual(["r", "t"]);
+    expect(bendCount(g.poly)).toBe(1);
   });
 });
 
@@ -90,10 +94,10 @@ describe("stacked boxes keep flowing downward (flowchart aesthetic)", () => {
     expect(g.sides).toEqual(["b", "t"]);
     expect(bendCount(g.poly)).toBe(0);
   });
-  it("B below-and-left (a branch) still enters from the top, ≤2 bends", () => {
+  it("B below-and-left (a branch) enters from the top via a 1-bend L", () => {
     const g = edge(rect(300, 100), rect(120, 340));
-    expect(g.sides).toEqual(["b", "t"]);
-    expect(bendCount(g.poly)).toBeLessThanOrEqual(2);
+    expect(g.sides).toEqual(["l", "t"]);     // exit A's left vertex, enter B's top
+    expect(bendCount(g.poly)).toBe(1);
   });
 });
 

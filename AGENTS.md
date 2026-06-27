@@ -55,14 +55,19 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   grid **A\*** (turn-penalised) around node obstacles (+margin), connected via axis-
   aligned **ports** (route between points *outside* the boxes — never let the jog
   happen inside a box, or the endpoint clip turns it into a diagonal). Side choice
-  is chosen per edge by **minimising bends**: `orthogonalGeometry` routes the candidate
-  orientations with centre ports and keeps the fewest-bend one. Candidates = the two
-  **facing** pairs (vertical, then horizontal); if neither is clean (≤2 bends) — e.g. two
-  boxes wedged so the channel between them is too tight for A* — it also tries the four
-  **same-side U-turns** (top-to-top / bottom-to-bottom / left-left / right-right) that go
-  AROUND the gap in 2 bends instead of wrapping in 4. Ties prefer vertical-facing >
-  horizontal-facing > U-turn, then shorter length. This beats any analytic gap threshold —
-  it directly *sees* when a thin channel forces a wrap (that was the 4-bend band).
+  per edge: **FIX the target's entry side** from the box relationship (vertically
+  separated ⇒ enter top/bottom = down/up flow; otherwise enter the facing left/right
+  side), then **MINIMISE BENDS over the source's exit** by routing the candidates.
+  - Stacked (vertical entry): source exit ∈ {vertical, horizontal} → straight trunk when
+    aligned, a **1-bend L** (side-of-A → top-of-B) when B is off to the side.
+  - Level (side entry): source exit is the matching side (side-to-side); we do NOT
+    bend-min into a bottom exit, because that flips in/out as you drag (looks wrong +
+    jumps).
+  - If the best is still >2 bends (boxes wedged tight): try the other entry side and the
+    four **same-side U-turns** (top-to-top / bottom-to-bottom / …) that go AROUND the gap
+    in 2 bends instead of wrapping in 4.
+  - A* is seeded with the **source stub direction** (`dirOf(pa.step)`); without it A*
+    turns freely at the first cell and wastes the stub, adding a phantom bend.
   Each result carries its chosen `sides` for testing. Invariant (test/router.test.js):
   sweeping a side-by-side box through a vertical range, the route **never exceeds 2
   bends** (a ≤2-bend route always exists when one axis has clearance; near-overlap on

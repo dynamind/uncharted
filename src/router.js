@@ -104,13 +104,17 @@ export function orthogonalGeometry(graph, bounds) {
   const free = (x, y) => x >= 0 && y >= 0 && x < cols && y < rows && occ[y*cols + x] === 0;
 
   const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
-  function astar(sx, sy, gxc, gyc) {
+  const dirOf = st => st[0] === 1 ? 0 : st[0] === -1 ? 1 : st[1] === 1 ? 2 : 3;
+  // sd = direction A* "arrives" travelling at the start (the source port's stub
+  // direction). Without it A* turns freely at the first cell and wastes the stub,
+  // adding a bend (e.g. a right-exit then an immediate down = an extra corner).
+  function astar(sx, sy, gxc, gyc, sd = -1) {
     if (!free(sx, sy) || !free(gxc, gyc) || (sx === gxc && sy === gyc)) return null;
     const skey = (x, y, d) => ((y*cols + x) << 3) | (d + 1);
     const g = new Map(), came = new Map(), heap = new MinHeap();
     const h = (x, y) => Math.abs(x-gxc) + Math.abs(y-gyc);
-    g.set(skey(sx,sy,-1), 0);
-    heap.push({ x: sx, y: sy, d: -1, f: h(sx,sy) });
+    g.set(skey(sx,sy,sd), 0);
+    heap.push({ x: sx, y: sy, d: sd, f: h(sx,sy) });
     let end = null;
     while (heap.size) {
       const cur = heap.pop(), ck = skey(cur.x, cur.y, cur.d), cg = g.get(ck);
@@ -183,10 +187,11 @@ export function orthogonalGeometry(graph, bounds) {
   const polyLen = poly => { let s = 0;
     for (let i = 1; i < poly.length; i++) s += Math.abs(poly[i].x-poly[i-1].x) + Math.abs(poly[i].y-poly[i-1].y);
     return s; };
-  // route between two explicit ports; null if A* can't reach
+  // route between two explicit ports; null if A* can't reach. Seed A* with the
+  // source stub direction so the first segment isn't wasted on a needless corner.
   function routePorts(pa, pb) {
     const oa = outer(pa), ob = outer(pb);
-    const path = oa && ob ? astar(oa.c, oa.r, ob.c, ob.r) : null;
+    const path = oa && ob ? astar(oa.c, oa.r, ob.c, ob.r, dirOf(pa.step)) : null;
     if (!path) return null;
     const poly = [{ x: pa.x, y: pa.y }];
     for (const p of path) poly.push({ x: wx(p.x), y: wy(p.y) });
@@ -194,13 +199,14 @@ export function orthogonalGeometry(graph, bounds) {
     return simplify(poly);
   }
 
-  // PHASE 1 — choose sides per edge by MINIMISING BENDS (centre ports). Try the
-  // facing pairs first (vertical, then horizontal). If neither gives a clean route
-  // (≤2 bends) — e.g. two boxes wedged close so the channel between them is too
-  // tight for A* and it has to wrap in 4 — fall back to same-side **U-turns**
-  // (top-to-top / bottom-to-bottom / …) that go AROUND the gap in 2 bends. Lower
-  // `pref` wins ties: vertical-facing (flow down) > horizontal-facing > U-turn;
-  // path length is the final tiebreak.
+  // PHASE 1 — per edge: FIX the target's entry side from the box relationship,
+  // then MINIMISE BENDS over the source's exit side.
+  //   • vertically separated boxes  → target entered top/bottom (down/up flow);
+  //   • otherwise (level / overlap) → target entered on the facing left/right side.
+  // The source then exits whichever side gives fewer bends — so B below & off to
+  // the side becomes "side-of-A → top-of-B" (1 bend), B directly below stays a
+  // straight trunk, and level boxes stay side-to-side. If the best is still >2
+  // bends (boxes wedged tight), try the other entry side and same-side U-turns.
   const evalSides = (a, b, s, pref) => {
     const poly = routePorts(makePort(a, s[0], 0), makePort(b, s[1], 0));
     const bends = poly ? poly.length - 2 : Infinity;
@@ -208,13 +214,28 @@ export function orthogonalGeometry(graph, bounds) {
   };
   const sides = edges.map(e => {
     const a = nodes[e.source], b = nodes[e.target];
-    let best = evalSides(a, b, a.y <= b.y ? ["b","t"] : ["t","b"], 0);   // vertical facing
-    const h = evalSides(a, b, a.x <= b.x ? ["r","l"] : ["l","r"], 1);    // horizontal facing
-    if (h.score < best.score) best = h;
-    if (best.bends > 2) {                                                 // tight → go around
-      for (const s of [["t","t"], ["b","b"], ["l","l"], ["r","r"]]) {
-        const u = evalSides(a, b, s, 2);
-        if (u.score < best.score) best = u;
+    const ha = Nodes.half(a), hb = Nodes.half(b);
+    const vGap = Math.max((b.y-hb.hh)-(a.y+ha.hh), (a.y-ha.hh)-(b.y+hb.hh));
+    const below = b.y >= a.y, right = b.x >= a.x;
+    const tgt = vGap > 0 ? (below ? "t" : "b") : (right ? "l" : "r");  // fixed target entry
+    const saV = below ? "b" : "t", saH = right ? "r" : "l";           // source exit options
+    // Stacked (target entered top/bottom): bend-min the source exit — vertical for
+    // a straight trunk when aligned, the side for a 1-bend L when B is off to the
+    // side. Level (target entered on a side): keep the source on the SAME side too
+    // (side-to-side) — don't let a coincidentally-1-bend bottom exit flip in as you
+    // drag, which both looks wrong for level boxes and causes a jump.
+    const cands = (tgt === "t" || tgt === "b") ? [[saV, tgt], [saH, tgt]] : [[saH, tgt]];
+    let best = null;
+    cands.forEach((s, i) => {                                         // bend-min the source exit
+      const r = evalSides(a, b, s, i);
+      if (!best || r.score < best.score) best = r;
+    });
+    if (best.bends > 2) {                                             // tight: other entry + U-turns
+      const alt = vGap > 0 ? (right ? "l" : "r") : (below ? "t" : "b");
+      const fb = [[saV, alt, 4], [saH, alt, 4], ["t","t",6], ["b","b",6], ["l","l",6], ["r","r",6]];
+      for (const [s0, s1, p] of fb) {
+        const r = evalSides(a, b, [s0, s1], p);
+        if (r.score < best.score) best = r;
       }
     }
     return best.s;
