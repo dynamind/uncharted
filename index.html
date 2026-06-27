@@ -261,6 +261,7 @@
       </div>
       <label class="toggle"><input type="checkbox" id="tg-hops" checked /><span class="box"></span><span class="t">Crossing hops</span></label>
       <label class="toggle"><input type="checkbox" id="tg-trunk" checked /><span class="box"></span><span class="t">Straight trunks <span style="color:var(--ink-faint)">· layered</span></span></label>
+      <label class="toggle"><input type="checkbox" id="tg-arrows" /><span class="box"></span><span class="t">Arrowheads</span></label>
       <label class="toggle"><input type="checkbox" id="tg-labels" /><span class="box"></span><span class="t">Node labels</span></label>
     </div>
 
@@ -928,6 +929,33 @@ const Renderer = (() => {
     }
 
     for (const n of graph.nodes) drawNode(ctx, n, opts);
+
+    // arrowheads last, so the filled glyph sits on top of the target node's
+    // border (its tip kisses the border; the body points back along the edge).
+    if (opts.arrows) {
+      ctx.fillStyle = getCss("--edge");
+      for (let i = 0; i < geom.length; i++) drawArrowhead(ctx, geom[i].poly);
+    }
+  }
+
+  // Directed glyph at the TARGET end (poly[last], already on the node border).
+  // Heading = the final segment's direction: a point at radius ARROW_LEN back up
+  // the line gives the triangle's base, the tip stays on the border. separateLanes
+  // never touches the port stub, so poly[last]-poly[last-1] is the clean entry axis.
+  const ARROW_LEN = 11, ARROW_HALF = 4.5;
+  function drawArrowhead(ctx, poly) {
+    const tip = poly[poly.length - 1], prev = poly[poly.length - 2];
+    const dx = tip.x - prev.x, dy = tip.y - prev.y, L = Math.hypot(dx, dy);
+    if (L < 1e-3) return;
+    const ux = dx/L, uy = dy/L;                       // unit heading into the target
+    const bx = tip.x - ux*ARROW_LEN, by = tip.y - uy*ARROW_LEN;   // base centre, radius n back
+    const nx = -uy, ny = ux;                          // perpendicular
+    ctx.beginPath();
+    ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(bx + nx*ARROW_HALF, by + ny*ARROW_HALF);
+    ctx.lineTo(bx - nx*ARROW_HALF, by - ny*ARROW_HALF);
+    ctx.closePath();
+    ctx.fill();
   }
 
   function drawNode(ctx, n, opts) {
@@ -1052,7 +1080,7 @@ const App = (() => {
       trunk: true,                             // layered: straighten primary paths
       weights: { cross: 1, len: 1, overlap: 1 }, // cost objective weights
     },
-    opts: { routing: "curved", hops: true, labels: false },
+    opts: { routing: "curved", hops: true, labels: false, arrows: false },
     view: { w: 0, h: 0, dpr: 1 },
     bounds: { x0: 0, y0: 0, x1: 0, y1: 0 },
   };
@@ -1159,7 +1187,7 @@ const App = (() => {
     }
     recompute();
     Renderer.draw(ctx, state.view, state.graph, state.geom, state.crossings, {
-      hops: state.opts.hops, labels: state.opts.labels,
+      hops: state.opts.hops, labels: state.opts.labels, arrows: state.opts.arrows,
     });
     updateMetricChips(false);
     requestAnimationFrame(frame);
@@ -1210,6 +1238,8 @@ const App = (() => {
         document.getElementById("sel-solver").value = "layered";
         state.opts.routing = "orthogonal";
         document.getElementById("sel-routing").value = "orthogonal";
+        state.opts.arrows = true;                       // directed DAG → show flow direction
+        document.getElementById("tg-arrows").checked = true;
         updateSolverUI();
       }
       loadGraph(gs.value);
@@ -1245,6 +1275,7 @@ const App = (() => {
       if (state.solverName === "layered") { buildSolver(); setRunning(true); }  // recompute targets
     });
     document.getElementById("tg-labels").addEventListener("change", e => state.opts.labels = e.target.checked);
+    document.getElementById("tg-arrows").addEventListener("change", e => state.opts.arrows = e.target.checked);
 
     // parameter sliders: live-bind to state.params; weights apply immediately,
     // structural knobs (spacing/gravity/cooling) take effect on the next re-solve.

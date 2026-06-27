@@ -165,7 +165,8 @@ approximates it physically; constructive solvers (layered/circular) target struc
 
 - DONE: facade + iterative `step()`/`done` seam; Canvas dark renderer w/ dot-grid;
   straight/curved/**orthogonal** routing; **crossing hops computed on real geometry**;
-  node shapes (circle/rect/diamond) + labels; shared `Objective`; all five solvers
+  node shapes (circle/rect/diamond) + labels; **arrowheads on directed edges** (toggle,
+  auto-on for the flowchart); shared `Objective`; all five solvers
   (`force`, `annealing`, `hillclimb`, `layered`, `circular`); **flowchart preset**;
   tunable cost-weight + cooling sliders; per-solver explainer; node dragging; keyboard
   (space/S/R); 8 presets. Verified in-browser (Claude Preview), no console errors.
@@ -191,25 +192,26 @@ approximates it physically; constructive solvers (layered/circular) target struc
   may be **< 1**. `frame()` accumulates it (`state._accum`) and runs `floor` steps, so the
   low end animates genuinely slowly (down to 0.15 steps/frame).
 
-## NEXT TASK — arrowheads on directed edges
+## NEXT TASK — long-edge dummy nodes for `layered` (proper Sugiyama)
 
-Channel separation is DONE (post-process `separateLanes`, PHASE 4), and edge-through-node
-now counts as a crossing (`segHitsBody`/`nodePierces`). 25 router tests total.
-The flowchart still reads as undirected lines — there are no arrowheads. Add a directed
-glyph at the **target** end of each rendered polyline, pointing along the final segment's
-direction (the orthogonal routes already end axis-aligned, so the arrow is one of 4 cardinal
-directions; curved/straight need the tangent of the last sample). Draw it in the renderer
-(inline in `index.html`, NOT `router.js` — keep the router DOM-free). Make it toggleable
-(an "Arrowheads" switch alongside Crossing hops / Node labels) and on by default for the
-flowchart preset. Keep the arrow clear of the node border (it sits at `poly[last]`, already
-on the border) and don't let it overlap the crossing hops.
+Recent work is all DONE: channel separation (`separateLanes`, PHASE 4), edge-through-node
+counts as a crossing (`segHitsBody`/`nodePierces`), and **arrowheads** (renderer-only,
+`drawArrowhead` in `index.html`; filled triangle, tip on `poly[last]`, base a radius back up
+`poly[last]-poly[last-1]`; toggle `tg-arrows`, auto-on for the flowchart). 25 router tests.
 
-Watch-outs:
-- The arrow tip is `poly[last]`; back it off along the incoming segment by a few px so the
-  triangle doesn't bury into the box.
-- `separateLanes` may have nudged the last *interior* vertex, but the final port segment is
-  untouched, so the incoming direction is still the clean port-stub axis — use `poly[last]`
-  minus `poly[last-1]` for the heading.
+The `layered` solver places a node in one layer per longest-path rank, but an edge that
+spans more than one layer is drawn as a single long line straight across the intervening
+layer(s) — it doesn't route around the nodes there, and barycentre crossing-reduction can't
+account for it because there's no vertex to order in the middle layers. Real Sugiyama
+inserts **dummy nodes** on every edge that skips a layer (one per crossed layer), orders
+them in the barycentre phase like real nodes, then routes the edge through their positions
+(and Brandes–Köpf for the x-coords). Add dummy-node insertion to `layered` so long edges
+bend through their layers instead of cutting across, and the crossing count drops.
+
+Where: the `layered` solver (inline in `index.html`). Keep it behind the existing solver
+seam. Orthogonal routing already polylines around obstacles, so the win is clearest with
+curved/straight routing and in the crossing metric. This is the biggest remaining gap to a
+"real" Dagre/ELK-class layered layout.
 
 ## Known limits / nice-to-haves for routing (lower priority)
 
@@ -223,6 +225,4 @@ Watch-outs:
 ## Other ideas (lower priority)
 
 - Real ELK backend behind the facade (would validate the seam end-to-end).
-- Arrowheads on directed edges (the flowchart reads as undirected lines today).
-- Layered: dummy nodes for long edges + Brandes–Köpf x-coords (proper Sugiyama).
 - Best-cost-so-far tracking / convergence sparkline; A/B race two solvers.
