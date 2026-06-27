@@ -438,33 +438,39 @@ export function separateLanes(geoms) {
 
 /* ---- arrowhead heading --------------------------------------------------- */
 // Direction for a directed arrowhead at the TARGET end of a rendered polyline.
-// Returns { tx, ty (tip on the border), ux, uy (unit heading INTO the target),
-// room (total polyline length) } — or null when there's no room (nodes on top of
-// each other). Robust near touching/overlapping nodes, where the naive
-// "poly[last] − poly[last-1]" both jitters (a ~1px baseline → unstable angle) and
-// flips backward (a curved tail can dip inside the target, and the attach point
-// rotates around it as the chord angle changes):
-//   • take the tangent from a baseline that is BOTH ≥ minBase back (stable angle)
-//     AND outside the target body (can't be flipped by an inside-the-node tail);
-//   • use it only if it actually points inward;
-//   • otherwise fall back to the source→target CENTRE chord, which always points
-//     into the target and never flips.
-export function arrowHeading(poly, source, target, minBase = 10) {
+// Returns { tx, ty (tip on the border, kept glued to the line end), ux, uy (unit
+// heading INTO the target), room (total polyline length) } — or null when there's
+// no room (nodes on top of each other).
+//
+// The TIP is always poly[last] (on the border, on the drawn line). The HEADING is
+// where it gets subtle near touching/overlapping nodes:
+//   • curved / straight → the source→target CENTRE chord. The bezier *tangent* is
+//     unreliable here: it both jitters (a ~1px tail → atan2 spins) and points far
+//     off-chord (a bulging curve's end tangent can be 60–80° sideways, even after
+//     ruling out a full backward flip). The chord is stable, always points into
+//     the target, and matches "a straight line from source to target".
+//   • orthogonal → the axis-aligned final segment (the chord would draw a diagonal
+//     arrow on an L-route). Take it from a baseline ≥ minBase back that's outside
+//     the target body and points inward; fall back to the chord if degenerate.
+export function arrowHeading(poly, source, target, mode, minBase = 10) {
   const tip = poly[poly.length - 1];
   let room = 0;
   for (let i = 1; i < poly.length; i++)
     room += Math.hypot(poly[i].x - poly[i-1].x, poly[i].y - poly[i-1].y);
   if (room < 5) return null;
-  let ux = 0, uy = 0, acc = 0;
-  for (let i = poly.length - 2; i >= 0; i--) {
-    acc += Math.hypot(poly[i+1].x - poly[i].x, poly[i+1].y - poly[i].y);
-    if (acc >= minBase && !(target && Nodes.inBody(target, poly[i].x, poly[i].y))) {
-      const dx = tip.x - poly[i].x, dy = tip.y - poly[i].y, L = Math.hypot(dx, dy);
-      if (L > 1e-3 && target && dx*(target.x - tip.x) + dy*(target.y - tip.y) > 0) { ux = dx/L; uy = dy/L; }
-      break;                                            // tried the best baseline; chord otherwise
+  let ux = 0, uy = 0;
+  if (mode === "orthogonal") {
+    let acc = 0;
+    for (let i = poly.length - 2; i >= 0; i--) {
+      acc += Math.hypot(poly[i+1].x - poly[i].x, poly[i+1].y - poly[i].y);
+      if (acc >= minBase && !(target && Nodes.inBody(target, poly[i].x, poly[i].y))) {
+        const dx = tip.x - poly[i].x, dy = tip.y - poly[i].y, L = Math.hypot(dx, dy);
+        if (L > 1e-3 && target && dx*(target.x - tip.x) + dy*(target.y - tip.y) > 0) { ux = dx/L; uy = dy/L; }
+        break;
+      }
     }
   }
-  if (ux === 0 && uy === 0) {                           // centre-chord fallback (always inward)
+  if (ux === 0 && uy === 0) {                           // chord (curved/straight + orthogonal fallback)
     const dx = target.x - source.x, dy = target.y - source.y, L = Math.hypot(dx, dy);
     if (L < 1e-3) return null;
     ux = dx/L; uy = dy/L;

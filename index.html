@@ -934,7 +934,7 @@ const Renderer = (() => {
     // border (its tip kisses the border; the body points back along the edge).
     if (opts.arrows) {
       ctx.fillStyle = getCss("--edge");
-      for (let i = 0; i < geom.length; i++) drawArrowhead(ctx, geom[i].poly, geom[i].a, geom[i].b);
+      for (let i = 0; i < geom.length; i++) drawArrowhead(ctx, geom[i].poly, geom[i].a, geom[i].b, opts.routing);
     }
   }
 
@@ -943,8 +943,8 @@ const Renderer = (() => {
   // here we just draw the filled triangle, shrinking it proportionally when the
   // edge is too short to fit the full glyph.
   const ARROW_LEN = 11, ARROW_HALF = 4.5;
-  function drawArrowhead(ctx, poly, source, target) {
-    const h = arrowHeading(poly, source, target);
+  function drawArrowhead(ctx, poly, source, target, mode) {
+    const h = arrowHeading(poly, source, target, mode);
     if (!h) return;
     const len = Math.min(ARROW_LEN, h.room), half = ARROW_HALF * (len / ARROW_LEN);
     const bx = h.tx - h.ux*len, by = h.ty - h.uy*len;   // base centre, a radius back up the line
@@ -1187,6 +1187,7 @@ const App = (() => {
     recompute();
     Renderer.draw(ctx, state.view, state.graph, state.geom, state.crossings, {
       hops: state.opts.hops, labels: state.opts.labels, arrows: state.opts.arrows,
+      routing: activeRouting(),
     });
     updateMetricChips(false);
     requestAnimationFrame(frame);

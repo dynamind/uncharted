@@ -175,7 +175,7 @@ approximates it physically; constructive solvers (layered/circular) target struc
   ports (no sibling crossings), A* seeded with the stub direction, grid-quantised length
   (no flicker), **hysteresis** (sticky + drag-steerable), and **channel separation**
   (`separateLanes` — co-running edges fanned into parallel tracks; verified in-browser on
-  K₆). All pinned by 29 Vitest tests
+  K₆). All pinned by 30 Vitest tests
   in `test/router.test.js` — the single best place to understand the routing contract.
   Run `npm test`. After ANY router change, also `npm run build` and check it stays a single
   file (`grep -c '<script src' dist/index.html` == 0).
@@ -196,15 +196,19 @@ approximates it physically; constructive solvers (layered/circular) target struc
 
 Recent work is all DONE: channel separation (`separateLanes`, PHASE 4), edge-through-node
 counts as a crossing (`segHitsBody`/`nodePierces`), and **arrowheads** (filled triangle at the
-target; toggle `tg-arrows`, auto-on for the flowchart). The robust **heading** is a pure
-function `arrowHeading(poly, source, target)` in `router.js` (renderer `drawArrowhead` just
-fills the triangle + shrinks it proportionally when `room` is tight). Heading rule, hardened
-for nodes dragged into contact/overlap: take the tangent from a baseline that is BOTH ≥10px
-back (a ~1px tail makes `atan2` spin → the arrow "rotates around the endpoint") AND outside
-the target body (`Nodes.inBody` — a curved tail can dip inside the node and the attach point
-rotates around it, flipping the triangle backward); use it only if it points inward; else
-fall back to the source→target **centre chord**, which always points in and never flips.
-Returns `null` (no glyph) when there's no room. 29 router tests.
+target; toggle `tg-arrows`, auto-on for the flowchart). The **heading** is a pure function
+`arrowHeading(poly, source, target, mode)` in `router.js` (renderer `drawArrowhead` just fills
+the triangle + shrinks it proportionally when `room` is tight). The TIP is always `poly[last]`
+(on the border, glued to the drawn line). The HEADING:
+  - **curved / straight → the source→target CENTRE chord.** The bezier *tangent* is unusable:
+    near close nodes it jitters (a ~1px tail → `atan2` spins, "rotates around the endpoint")
+    and a bulging curve's end tangent points 60–80° sideways even when not fully reversed.
+    The chord is stable, always inward, and is what the user asked for ("a straight line from
+    source to target"). Straight routing already equals this.
+  - **orthogonal → the axis-aligned final segment** (a chord would draw a diagonal arrow on an
+    L-route): the segment from a baseline ≥10px back that's outside the target body
+    (`Nodes.inBody`) and points inward; chord fallback if degenerate.
+Returns `null` (no glyph) when there's no room. 30 router tests.
 
 The `layered` solver places a node in one layer per longest-path rank, but an edge that
 spans more than one layer is drawn as a single long line straight across the intervening
