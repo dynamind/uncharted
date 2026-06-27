@@ -32,12 +32,21 @@ attack it.
   *visible*; a batch backend like ELK would wrap its result behind the same seam.
 - Solvers register themselves into `LayoutEngine.solvers[name]`. Adding a solver =
   add one entry; nothing else needs to know.
-- Graph model: `{ nodes: [{id, x, y, ...}], edges: [{source, target}] }` where
-  `source`/`target` are node indices.
+- Graph model: `{ nodes: [{id, x, y, shape?, w?, h?, label?, ...}], edges: [{source, target}] }`.
+  `source`/`target` are node indices. Nodes default to circles; flowchart nodes set
+  `shape: "rect"|"diamond"` + `w,h,label`. `Nodes` helper does size/border/hit-testing.
 - Rendering: HTML5 **Canvas** (chosen for smooth 60fps physics animation).
-- **Crossing detection and hop rendering share the same intersection points** so the
-  metric ("crossings") and the visuals never disagree. Edges are sampled into
-  polylines; intersections found with a bbox prefilter + segment test.
+- **Edge routing is separate from solving.** `edgeGeometry(graph, mode, bounds)` →
+  per-edge rendered polylines. Modes: `straight | curved | orthogonal`. Orthogonal is
+  grid **A\*** (turn-penalised) around node obstacles (+margin), connected via axis-
+  aligned **ports** (route between points *outside* the boxes — never let the jog
+  happen inside a box, or the endpoint clip turns it into a diagonal).
+- **CROSSINGS ARE COMPUTED ON THE ACTUAL RENDERED POLYLINES** (`Renderer.crossings`,
+  bbox prefilter + segment test) — the metric AND the hops read from the same points,
+  so a hop only ever appears where the drawn lines truly cross. (This replaced the old
+  chord-based count, which made hops drift/flip/phantom over curves.) Hops bulge to a
+  consistent side (up; right for vertical runs). `Objective.crossings` (chord-based)
+  still exists but is only the SA/hillclimb *optimisation target*, not what's drawn.
 
 ## Solver lineup (the point of the demo)
 
@@ -45,9 +54,19 @@ attack it.
 - `annealing` — Simulated Annealing à la Davidson–Harel: minimize a weighted cost
   (crossings + edge length + overlap + border). The headline metaheuristic.
 - `hillclimb` — same neighborhood as SA but greedy (T=0). Shows local-minima trapping.
-- `layered` — Sugiyama-lite (longest-path layering + median crossing reduction +
-  barycenter x). The Dagre/ELK-family analogue.
+- `layered` — Sugiyama-lite: **longest-path layering along edge direction** (sources on
+  top) + barycentre crossing reduction + **x-coordinate alignment** (pull to neighbour
+  mean, resolve overlaps) so columns line up and edges run straight. The Dagre/ELK
+  analogue. Pair with orthogonal routing for the flowchart.
 - `circular` — nodes on a ring; baseline + reorder. Cheap contrast.
+
+## Routing & the flowchart example
+
+- `flowchart` preset = a small DAG (rect boxes + decision diamonds + labels). Selecting
+  it auto-switches to `layered` + `orthogonal` (see the `sel-graph` change handler).
+- Orthogonal A* is deferred during energy-based solver motion (force/annealing/hillclimb
+  route straight until `done`, then snap to orthogonal) — see `activeRouting()`. Geometry
+  is cached by a position+routing+done signature so A* doesn't run every idle frame.
 
 ## Cost function (combinatorial objective)
 
@@ -64,19 +83,18 @@ approximates it physically; constructive solvers (layered/circular) target struc
 ## Status (keep honest)
 
 - DONE: facade + iterative `step()`/`done` seam; Canvas dark renderer w/ dot-grid;
-  quadratic-bezier curved edges; crossing hops (snap to nearest curve vertex);
-  shared `Objective` (crossings + length-deviation + overlap); all five solvers
-  (`force`, `annealing`, `hillclimb`, `layered`, `circular`); tunable cost-weight
-  + cooling sliders; per-solver explainer; node dragging; keyboard (space/S/R);
-  7 presets. Verified in-browser (Claude Preview), no console errors.
-- Crossings are chord-based (the straight-line crossing number); edges are *drawn*
-  curved. Hops snap to the nearest curve vertex, so the count and the visuals agree.
+  straight/curved/**orthogonal** routing; **crossing hops computed on real geometry**;
+  node shapes (circle/rect/diamond) + labels; shared `Objective`; all five solvers
+  (`force`, `annealing`, `hillclimb`, `layered`, `circular`); **flowchart preset**;
+  tunable cost-weight + cooling sliders; per-solver explainer; node dragging; keyboard
+  (space/S/R); 8 presets. Verified in-browser (Claude Preview), no console errors.
 - The length term penalises |len − k| (deviation from ideal), NOT raw length —
   raw length made SA collapse the graph to a point. Do not regress this.
 
 ## TODO / ideas not yet done
 
 - Real ELK backend behind the facade (would validate the seam).
-- Sugiyama: dummy nodes for long edges + true Brandes–Köpf x-coordinates.
-- Best-cost-so-far tracking / a convergence sparkline.
-- A/B split view to race two solvers on the same graph.
+- Orthogonal routing: separate parallel edges into distinct channels (they can overlap
+  in a shared lane now); dummy nodes for long layered edges + Brandes–Köpf x-coords.
+- Arrowheads on directed edges (the flowchart reads as undirected lines today).
+- Best-cost-so-far tracking / a convergence sparkline; A/B race two solvers.

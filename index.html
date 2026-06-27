@@ -389,9 +389,28 @@ const Presets = {
     for (let c = 1; c < k; c++) edges.push({ source: heads[c-1], target: heads[c] });
     return { nodes, edges };
   },
+  flowchart() { // a small DAG that reads like a real flowchart
+    const defs = [
+      ["Start","rect"], ["Receive\nrequest","rect"], ["Authorised?","diamond"],
+      ["Reject","rect"], ["Parse body","rect"], ["Valid?","diamond"],
+      ["Process","rect"], ["Error","rect"], ["Respond","rect"], ["End","rect"],
+    ];
+    const nodes = defs.map((d, i) => ({
+      id: i, label: d[0], shape: d[1],
+      w: d[1] === "diamond" ? 104 : 98, h: d[1] === "diamond" ? 56 : 40,
+    }));
+    const E = (s, t) => ({ source: s, target: t });
+    const edges = [
+      E(0,1), E(1,2), E(2,4), E(2,3),     // start → receive → auth? → (yes parse / no reject)
+      E(4,5), E(5,6), E(5,7),             // parse → valid? → (yes process / no error)
+      E(6,8), E(3,8), E(7,8), E(8,9),     // process/reject/error → respond → end
+    ];
+    return { nodes, edges };
+  },
 };
 
 const PRESET_LIST = [
+  ["flowchart", "Flowchart (DAG)",    () => Presets.flowchart()],
   ["tree",      "Binary tree",        () => Presets.tree(5, 2)],
   ["grid",      "Grid lattice 6×5",   () => Presets.grid(6, 5)],
   ["cube",      "Cube graph Q₃",      () => Presets.cube()],
@@ -686,51 +705,74 @@ function circularTargets(graph, bounds) {
   return t;
 }
 
-// Layered (Sugiyama-lite): BFS layering + barycentre crossing reduction.
-// The Dagre / ELK-family approach, distilled to its three classic phases.
+// Layered (Sugiyama-lite): the Dagre / ELK-family approach in four classic phases.
 function layeredTargets(graph, bounds) {
   const { nodes, edges } = graph;
-  const adj = nodes.map(() => []);
+  const N = nodes.length;
+  const adj = nodes.map(() => []);                  // undirected, for ordering
   edges.forEach(e => { adj[e.source].push(e.target); adj[e.target].push(e.source); });
 
-  // 1. layer assignment — BFS depth from the highest-degree root (per component)
-  let root = 0, bd = -1;
-  for (let i = 0; i < nodes.length; i++) if (adj[i].length > bd) { bd = adj[i].length; root = i; }
-  const layer = new Array(nodes.length).fill(-1);
-  for (let s = 0; s < nodes.length; s++) {
-    const start = s === 0 ? root : s;
-    if (layer[start] >= 0) continue;
-    layer[start] = 0; const q = [start];
-    while (q.length) { const u = q.shift();
-      for (const v of adj[u]) if (layer[v] < 0) { layer[v] = layer[u] + 1; q.push(v); } }
+  // 1. layer assignment — longest-path along edge DIRECTION (source→target), so
+  //    a DAG/flowchart flows top-down with its sources on top. Presets build
+  //    edges with source<target, so this is acyclic; the pass count caps cycles.
+  const layer = new Array(N).fill(0);
+  for (let pass = 0; pass < N; pass++) {
+    let changed = false;
+    for (const e of edges)
+      if (layer[e.target] < layer[e.source] + 1) { layer[e.target] = layer[e.source] + 1; changed = true; }
+    if (!changed) break;
   }
   let maxL = 0; for (const l of layer) maxL = Math.max(maxL, l);
   const order = []; for (let l = 0; l <= maxL; l++) order.push([]);
-  for (let i = 0; i < nodes.length; i++) order[layer[i]].push(i);
+  for (let i = 0; i < N; i++) order[layer[i]].push(i);
 
   // 2. crossing reduction — repeated barycentre sweeps, down then up
-  const posOf = () => { const p = new Array(nodes.length);
+  const posOf = () => { const p = new Array(N);
     order.forEach(a => a.forEach((id, idx) => p[id] = idx)); return p; };
   const bary = (id, nl, p) => { let s = 0, c = 0;
     for (const v of adj[id]) if (layer[v] === nl) { s += p[v]; c++; }
     return c ? s / c : p[id]; };
-  for (let sweep = 0; sweep < 10; sweep++) {
+  for (let sweep = 0; sweep < 12; sweep++) {
     let p = posOf();
     for (let l = 1; l <= maxL; l++) order[l].sort((a, b) => bary(a, l-1, p) - bary(b, l-1, p));
     p = posOf();
     for (let l = maxL-1; l >= 0; l--) order[l].sort((a, b) => bary(a, l+1, p) - bary(b, l+1, p));
   }
 
-  // 3. coordinate assignment — layer -> y, position-in-layer -> x
+  // 3. x-coordinate alignment — pull each node toward the mean of its neighbours,
+  //    then resolve overlaps within the layer keeping the chosen order. This is
+  //    what lines parents up over children so vertical edges come out straight.
+  let sep = 40;
+  for (const n of nodes) sep = Math.max(sep, Nodes.half(n).hw * 2 + 26);
+  const x = new Array(N);
+  order.forEach(arr => arr.forEach((id, idx) => x[id] = idx * sep));
+  for (let pass = 0; pass < 8; pass++) {
+    for (const arr of order) {
+      for (const id of arr) {
+        let s = 0, c = 0;
+        for (const v of adj[id]) { s += x[v]; c++; }
+        if (c) x[id] = s / c;
+      }
+      for (let k = 1; k < arr.length; k++)             // left→right: enforce gap
+        if (x[arr[k]] < x[arr[k-1]] + sep) x[arr[k]] = x[arr[k-1]] + sep;
+      for (let k = arr.length-2; k >= 0; k--)          // right→left: pull back
+        if (x[arr[k]] > x[arr[k+1]] - sep) x[arr[k]] = x[arr[k+1]] - sep;
+    }
+  }
+
+  // 4. coordinate assignment — layer → y; aligned x mapped/scaled into bounds
   const W = bounds.x1 - bounds.x0, H = bounds.y1 - bounds.y0;
-  const t = new Array(nodes.length);
-  for (let l = 0; l <= maxL; l++) {
-    const arr = order[l], n = arr.length;
-    const y = bounds.y0 + (maxL === 0 ? H/2 : H * l / maxL);
-    arr.forEach((id, idx) => {
-      const x = bounds.x0 + (n === 1 ? W/2 : W * idx / (n - 1));
-      t[id] = { x, y };
-    });
+  const cx = (bounds.x0 + bounds.x1) / 2;
+  let minx = Infinity, maxx = -Infinity;
+  for (const v of x) { if (v < minx) minx = v; if (v > maxx) maxx = v; }
+  const mid = (minx + maxx) / 2, span = maxx - minx;
+  const scale = span > W ? W / span : 1;
+  const t = new Array(N);
+  for (let i = 0; i < N; i++) {
+    t[i] = {
+      x: cx + (x[i] - mid) * scale,
+      y: bounds.y0 + (maxL === 0 ? H/2 : H * layer[i] / maxL),
+    };
   }
   return t;
 }
@@ -860,7 +902,8 @@ const Renderer = (() => {
     if (n.label) {                       // flowchart label, inside the box
       ctx.fillStyle = getCss("--ink"); ctx.font = "600 11px " + getCss("--sans");
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
-      ctx.fillText(n.label, n.x, n.y);
+      const lines = n.label.split("\n");
+      lines.forEach((ln, li) => ctx.fillText(ln, n.x, n.y + (li - (lines.length-1)/2) * 13));
     } else if (opts.labels) {            // debug id, above the node
       ctx.fillStyle = getCss("--ink-dim"); ctx.font = "10px " + getCss("--mono");
       ctx.textAlign = "center"; ctx.textBaseline = "middle";
@@ -925,10 +968,144 @@ const Renderer = (() => {
   return { crossings, draw, SAMPLES };
 })();
 
+/* --- Orthogonal (Manhattan) routing via grid A* ---------------------------
+   The flowchart style. We lay a coarse grid over the canvas, block the cells
+   covered by each node (plus a margin), and route every edge with A* that
+   penalises turns — so paths run in straight H/V runs and bend around boxes.
+   This is what addresses both "lines should be straight" and "route around
+   nodes with a margin". --- */
+class MinHeap {
+  constructor() { this.a = []; }
+  get size() { return this.a.length; }
+  push(it) { const a = this.a; a.push(it); let i = a.length-1;
+    while (i > 0) { const p = (i-1)>>1; if (a[p].f <= a[i].f) break; [a[p],a[i]]=[a[i],a[p]]; i = p; } }
+  pop() { const a = this.a, top = a[0], last = a.pop();
+    if (a.length) { a[0] = last; let i = 0; for (;;) {
+      let l = 2*i+1, r = l+1, s = i;
+      if (l < a.length && a[l].f < a[s].f) s = l;
+      if (r < a.length && a[r].f < a[s].f) s = r;
+      if (s === i) break; [a[s],a[i]]=[a[i],a[s]]; i = s; } }
+    return top; }
+}
+
+const ORTHO = { cell: 15, margin: 11, turn: 4 };
+
+function orthogonalGeometry(graph, bounds) {
+  const { nodes, edges } = graph, C = ORTHO;
+  const x0 = bounds.x0 - 36, y0 = bounds.y0 - 36;
+  const cols = Math.ceil((bounds.x1 - x0 + 36) / C.cell) + 1;
+  const rows = Math.ceil((bounds.y1 - y0 + 36) / C.cell) + 1;
+  const gx = px => Math.round((px - x0) / C.cell);
+  const gy = py => Math.round((py - y0) / C.cell);
+  const wx = cx => x0 + cx * C.cell, wy = cy => y0 + cy * C.cell;
+  const occ = new Uint8Array(cols * rows);          // 1 = blocked by a node
+
+  nodes.forEach(n => {
+    const { hw, hh } = Nodes.half(n);
+    const cx0 = gx(n.x-hw-C.margin), cx1 = gx(n.x+hw+C.margin);
+    const cy0 = gy(n.y-hh-C.margin), cy1 = gy(n.y+hh+C.margin);
+    for (let cy = cy0; cy <= cy1; cy++) for (let cx = cx0; cx <= cx1; cx++) {
+      if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) continue;
+      occ[cy*cols + cx] = 1;
+    }
+  });
+  const free = (x, y) => x >= 0 && y >= 0 && x < cols && y < rows && occ[y*cols + x] === 0;
+
+  const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
+  function astar(sx, sy, gxc, gyc) {
+    if (!free(sx, sy) || !free(gxc, gyc) || (sx === gxc && sy === gyc)) return null;
+    const skey = (x, y, d) => ((y*cols + x) << 3) | (d + 1);
+    const g = new Map(), came = new Map(), heap = new MinHeap();
+    const h = (x, y) => Math.abs(x-gxc) + Math.abs(y-gyc);
+    g.set(skey(sx,sy,-1), 0);
+    heap.push({ x: sx, y: sy, d: -1, f: h(sx,sy) });
+    let end = null;
+    while (heap.size) {
+      const cur = heap.pop(), ck = skey(cur.x, cur.y, cur.d), cg = g.get(ck);
+      if (cg === undefined) continue;
+      if (cur.x === gxc && cur.y === gyc) { end = ck; break; }
+      for (let di = 0; di < 4; di++) {
+        const nx = cur.x + DIRS[di][0], ny = cur.y + DIRS[di][1];
+        if (!free(nx, ny)) continue;
+        const ng = cg + 1 + (cur.d !== -1 && cur.d !== di ? C.turn : 0);
+        const nk = skey(nx, ny, di);
+        if (g.get(nk) === undefined || ng < g.get(nk)) {
+          g.set(nk, ng); came.set(nk, ck);
+          heap.push({ x: nx, y: ny, d: di, f: ng + h(nx, ny) });
+        }
+      }
+    }
+    if (end === null) return null;
+    const path = [];
+    for (let k = end; k !== undefined; k = came.get(k)) {
+      const idx = k >> 3; path.push({ x: idx % cols, y: (idx / cols) | 0 });
+    }
+    return path.reverse();
+  }
+
+  // a port: the centre of the node side facing `toward`, snapped to a grid line
+  // so the stub out of the box is perfectly axis-aligned.
+  function port(n, toward) {
+    const { hw, hh } = Nodes.half(n);
+    const dx = toward.x - n.x, dy = toward.y - n.y;
+    if (Math.abs(dy) >= Math.abs(dx)) {
+      const col = gx(n.x), down = dy >= 0;
+      return { x: wx(col), y: n.y + (down ? hh : -hh), col, row: gy(n.y + (down ? hh : -hh)),
+               step: down ? [0,1] : [0,-1], vert: true };
+    }
+    const row = gy(n.y), right = dx >= 0;
+    return { x: n.x + (right ? hw : -hw), y: wy(row), col: gx(n.x + (right ? hw : -hw)), row,
+             step: right ? [1,0] : [-1,0], vert: false };
+  }
+  // first free cell stepping outward from a port (past its node's margin)
+  function outer(p) {
+    let c = p.col, r = p.row;
+    for (let i = 0; i < 8; i++) {
+      c += p.step[0]; r += p.step[1];
+      if (free(c, r)) return { c, r };
+    }
+    return null;
+  }
+  const collinear = (p, q, r) =>
+    Math.abs((q.x-p.x)*(r.y-p.y) - (q.y-p.y)*(r.x-p.x)) < 0.5;
+  function simplify(poly) {
+    const out = [poly[0]];
+    for (let i = 1; i < poly.length - 1; i++)
+      if (!collinear(out[out.length-1], poly[i], poly[i+1])) out.push(poly[i]);
+    out.push(poly[poly.length-1]);
+    return out;
+  }
+  // clean orthogonal connector used when A* can't find a route
+  function elbow(pa, pb) {
+    const a = { x: pa.x, y: pa.y }, b = { x: pb.x, y: pb.y };
+    if (pa.vert && pb.vert) { const my = (a.y+b.y)/2; return [a, {x:a.x,y:my}, {x:b.x,y:my}, b]; }
+    if (!pa.vert && !pb.vert) { const mx = (a.x+b.x)/2; return [a, {x:mx,y:a.y}, {x:mx,y:b.y}, b]; }
+    return pa.vert ? [a, {x:a.x,y:b.y}, b] : [a, {x:b.x,y:a.y}, b];
+  }
+
+  return edges.map(e => {
+    const a = nodes[e.source], b = nodes[e.target];
+    const pa = port(a, b), pb = port(b, a);
+    const oa = outer(pa), ob = outer(pb);
+    let poly;
+    const path = oa && ob ? astar(oa.c, oa.r, ob.c, ob.r) : null;
+    if (path) {
+      poly = [{ x: pa.x, y: pa.y }];
+      for (const p of path) poly.push({ x: wx(p.x), y: wy(p.y) });
+      poly.push({ x: pb.x, y: pb.y });
+      poly = simplify(poly);
+    } else {
+      poly = elbow(pa, pb);                          // graceful orthogonal fallback
+    }
+    return { poly, a, b };
+  });
+}
+
 /* Edge routing — turns node positions into rendered polylines. Modes:
    straight | curved | orthogonal. Endpoints are clipped to node borders so a
-   line meets the box edge, not its centre. (orthogonal added below) */
-function edgeGeometry(graph, mode) {
+   line meets the box edge, not its centre. */
+function edgeGeometry(graph, mode, bounds) {
+  if (mode === "orthogonal") return orthogonalGeometry(graph, bounds);
   const { nodes, edges } = graph;
   return edges.map((e, i) => {
     const a = nodes[e.source], b = nodes[e.target];
@@ -1015,10 +1192,31 @@ const App = (() => {
     document.getElementById("hud-solver").textContent = state.solverName;
   }
 
+  // Orthogonal A* is heavy to run every frame, so during an energy-based solver's
+  // motion we route straight and snap to orthogonal once it settles.
+  function activeRouting() {
+    if (state.opts.routing !== "orthogonal") return state.opts.routing;
+    const heavy = state.solverName === "force" || state.solverName === "annealing"
+               || state.solverName === "hillclimb";
+    if (heavy && state.solver && !state.solver.done) return "straight";
+    return "orthogonal";
+  }
+
+  let _sig = null;
+  function posSig() {
+    const n = state.graph.nodes; let s = 0;
+    for (let i = 0; i < n.length; i++) s += (n[i].x * 31.7 + n[i].y * 17.3) * (i + 1);
+    const done = state.solver && state.solver.done ? 1 : 0;
+    return Math.round(s) + "|" + activeRouting() + "|" + n.length + "|" + done;
+  }
   function recompute() {
     // Geometry is routed first; crossings (metric + hops) are then read off the
-    // ACTUAL polylines, so what you count is exactly what you see.
-    state.geom = Renderer.edgeGeometry(state.graph, state.opts.routing);
+    // ACTUAL polylines, so what you count is exactly what you see. Cached by a
+    // position signature so orthogonal A* only re-runs when something moves.
+    const sig = posSig();
+    if (sig === _sig) return;
+    _sig = sig;
+    state.geom = Renderer.edgeGeometry(state.graph, activeRouting(), state.bounds);
     state.crossings = Renderer.crossings(state.geom);
   }
 
@@ -1097,7 +1295,17 @@ const App = (() => {
       const o = document.createElement("option"); o.value = id; o.textContent = label; gs.appendChild(o);
     }
     gs.value = state.presetName;
-    gs.addEventListener("change", () => loadGraph(gs.value));
+    gs.addEventListener("change", () => {
+      // the flowchart shines with the layered solver + orthogonal routing
+      if (gs.value === "flowchart") {
+        state.solverName = "layered";
+        document.getElementById("sel-solver").value = "layered";
+        state.opts.routing = "orthogonal";
+        document.getElementById("sel-routing").value = "orthogonal";
+        updateSolverUI();
+      }
+      loadGraph(gs.value);
+    });
 
     document.getElementById("sel-solver").addEventListener("change", e => {
       state.solverName = e.target.value; buildSolver(); updateSolverUI(); setRunning(true);
@@ -1160,9 +1368,9 @@ const App = (() => {
     hillclimb: "The same nudges as annealing, but it only ever accepts an " +
            "improvement. Fast — and a vivid demonstration of getting trapped in a " +
            "local minimum. Re-solve to see different traps.",
-    layered: "Sugiyama in three phases: assign layers by BFS depth, reorder within " +
-           "each layer by neighbour barycentre to cut crossings, then place. This " +
-           "is the Dagre / ELK family.",
+    layered: "Sugiyama: layer nodes by longest path, reorder each layer by neighbour " +
+           "barycentre to cut crossings, then align columns so edges run straight. " +
+           "Pair with Orthogonal routing for a flowchart. The Dagre / ELK family.",
     circular: "Nodes on a ring in BFS order — a cheap baseline. Compare its " +
            "crossing count against the optimisers on the same graph.",
   };
