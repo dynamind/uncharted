@@ -61,6 +61,27 @@ describe("pixel sweep — a side-by-side edge never exceeds 2 bends", () => {
     }
     expect(offenders).toEqual([]);
   });
+
+  // The reported wedge: boxes nearly side-by-side with the channel between them too
+  // tight to route through. A same-side U-turn (over the top / under the bottom) is
+  // 2 bends; the old code wrapped vertically in 4.
+  it("tight horizontal gap → ≤2 bends via a U-turn, never a 4-bend wrap", () => {
+    const bounds = { x0: 0, y0: 0, x1: 900, y1: 900 };
+    const offenders = [];
+    for (let gap = 2; gap <= 280; gap++) {            // edge-to-edge gap, clear → very tight
+      const g = edge(rect(220, 450), rect(220 + 98 + gap, 450), bounds);  // same Y
+      const b = bendCount(g.poly);
+      if (b > 2) offenders.push({ gap, bends: b });
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("tight gap with a small Y offset still stays ≤2 bends", () => {
+    for (const dy of [0, 12, 28]) {
+      const g = edge(rect(220, 450), rect(338, 450 + dy));  // ~20px gap (< 2*margin)
+      expect(bendCount(g.poly)).toBeLessThanOrEqual(2);
+    }
+  });
 });
 
 describe("stacked boxes keep flowing downward (flowchart aesthetic)", () => {

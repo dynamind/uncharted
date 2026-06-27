@@ -66,17 +66,6 @@ export const Nodes = {
 export const ORTHO = { cell: 15, margin: 11, turn: 8 };
 const SAMPLES = 18;        // bezier samples per curved edge
 
-// Candidate side pairs for an edge a→b: the vertical-facing pair and the
-// horizontal-facing pair. orthogonalGeometry picks between them by actually
-// routing and counting bends (an analytic gap threshold can't see when a thin
-// channel forces A* to wrap into extra bends — that was the 4-bend bug).
-function candidateSides(a, b) {
-  return [
-    a.y <= b.y ? ["b", "t"] : ["t", "b"],   // vertical (preferred on ties → flow down)
-    a.x <= b.x ? ["r", "l"] : ["l", "r"],   // horizontal
-  ];
-}
-
 /* ---- min-heap for A* ----------------------------------------------------- */
 class MinHeap {
   constructor() { this.a = []; }
@@ -205,20 +194,30 @@ export function orthogonalGeometry(graph, bounds) {
     return simplify(poly);
   }
 
-  // PHASE 1 — choose sides per edge by MINIMISING BENDS (centre ports). A thin
-  // vertical channel that would force A* to wrap loses to the clean side-to-side
-  // route; ties prefer the vertical pair so stacked flowchart edges flow downward.
+  // PHASE 1 — choose sides per edge by MINIMISING BENDS (centre ports). Try the
+  // facing pairs first (vertical, then horizontal). If neither gives a clean route
+  // (≤2 bends) — e.g. two boxes wedged close so the channel between them is too
+  // tight for A* and it has to wrap in 4 — fall back to same-side **U-turns**
+  // (top-to-top / bottom-to-bottom / …) that go AROUND the gap in 2 bends. Lower
+  // `pref` wins ties: vertical-facing (flow down) > horizontal-facing > U-turn;
+  // path length is the final tiebreak.
+  const evalSides = (a, b, s, pref) => {
+    const poly = routePorts(makePort(a, s[0], 0), makePort(b, s[1], 0));
+    const bends = poly ? poly.length - 2 : Infinity;
+    return { s, bends, score: bends * 1e7 + pref * 1e4 + (poly ? polyLen(poly) : 1e9) };
+  };
   const sides = edges.map(e => {
     const a = nodes[e.source], b = nodes[e.target];
-    const cands = candidateSides(a, b);
-    let best = null;
-    for (let ci = 0; ci < cands.length; ci++) {
-      const poly = routePorts(makePort(a, cands[ci][0], 0), makePort(b, cands[ci][1], 0));
-      const bends = poly ? poly.length - 2 : Infinity;
-      const score = bends * 1e6 + ci * 1e3 + (poly ? polyLen(poly) : 1e9);  // bends ≫ vertical-bias ≫ length
-      if (!best || score < best.score) best = { sides: cands[ci], score };
+    let best = evalSides(a, b, a.y <= b.y ? ["b","t"] : ["t","b"], 0);   // vertical facing
+    const h = evalSides(a, b, a.x <= b.x ? ["r","l"] : ["l","r"], 1);    // horizontal facing
+    if (h.score < best.score) best = h;
+    if (best.bends > 2) {                                                 // tight → go around
+      for (const s of [["t","t"], ["b","b"], ["l","l"], ["r","r"]]) {
+        const u = evalSides(a, b, s, 2);
+        if (u.score < best.score) best = u;
+      }
     }
-    return best.sides;
+    return best.s;
   });
 
   // PHASE 2 — offsets along each chosen side: lean toward the endpoint, then
