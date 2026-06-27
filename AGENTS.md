@@ -175,7 +175,7 @@ approximates it physically; constructive solvers (layered/circular) target struc
   ports (no sibling crossings), A* seeded with the stub direction, grid-quantised length
   (no flicker), **hysteresis** (sticky + drag-steerable), and **channel separation**
   (`separateLanes` — co-running edges fanned into parallel tracks; verified in-browser on
-  K₆). All pinned by 31 Vitest tests
+  K₆). All pinned by 32 Vitest tests
   in `test/router.test.js` — the single best place to understand the routing contract.
   Run `npm test`. After ANY router change, also `npm run build` and check it stays a single
   file (`grep -c '<script src' dist/index.html` == 0).
@@ -200,18 +200,20 @@ target; toggle `tg-arrows`, auto-on for the flowchart). The **heading** is a pur
 `arrowHeading(poly, source, target, mode)` in `router.js` (renderer `drawArrowhead` just fills
 the triangle + shrinks it proportionally when `room` is tight). The TIP is always `poly[last]`
 (on the border, glued to the drawn line). The HEADING:
-  - **curved / straight → the source→target CENTRE chord.** The bezier *tangent* is unusable:
-    near close nodes it jitters (a ~1px tail → `atan2` spins, "rotates around the endpoint")
-    and a bulging curve's end tangent points 60–80° sideways even when not fully reversed.
-    The chord is stable, always inward, and is what the user asked for ("a straight line from
-    source to target"). Straight routing already equals this.
-  - **orthogonal → the axis-aligned final segment** (a chord would draw a diagonal arrow on an
-    L-route): the segment from a baseline ≥10px back that's outside the target body
-    (`Nodes.inBody`) and points inward; chord fallback if degenerate.
+  - **curved / straight → a SECANT over the last `back` (=11px) of arc length**, so the arrow
+    *continues the line* (the curve's end-tangent is ~10° off the chord; the raw chord makes
+    long edges look wrong — that was a regression we fixed). The naive last sample is unusable
+    (a ~1px tail → `atan2` jitters/"rotates around the endpoint"; the clipped tail can point
+    backward), so trust the secant only when **inward AND within ~35° of the chord**; on a very
+    short / strongly-bulged edge (secant wraps the bulge) fall back to the stable chord. Straight
+    routing has a 2-pt polyline so its secant == chord.
+  - **orthogonal → the axis-aligned final segment** (`poly[last]−poly[last-1]`; a chord would
+    draw a diagonal arrow on an L-route). The port stub is always outside the body and
+    axis-aligned, so no walk-back/`inBody` needed — and we never walk past a near-target corner.
 `arrowHeading` returns `room` = the straight **span between the rendered endpoints** (NOT the
 arc length — a bulging curve between near-touching nodes has a long arc but a tiny chord);
 the renderer **skips the arrow entirely when `room < ARROW_LEN`** (edge shorter than the glyph
-— no tiny/overrunning arrows on near-touching nodes), else draws it full size. 31 router tests.
+— no tiny/overrunning arrows on near-touching nodes), else draws it full size. 32 router tests.
 
 The `layered` solver places a node in one layer per longest-path rank, but an edge that
 spans more than one layer is drawn as a single long line straight across the intervening

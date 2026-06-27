@@ -443,33 +443,44 @@ export function separateLanes(geoms) {
 // — the visible "edge length", NOT the arc length, so a bulging curve between two
 // near-touching nodes correctly reads as short) } — or null when there's no room.
 //
-// The TIP is always poly[last] (on the border, on the drawn line). The HEADING is
-// where it gets subtle near touching/overlapping nodes:
-//   • curved / straight → the source→target CENTRE chord. The bezier *tangent* is
-//     unreliable here: it both jitters (a ~1px tail → atan2 spins) and points far
-//     off-chord (a bulging curve's end tangent can be 60–80° sideways, even after
-//     ruling out a full backward flip). The chord is stable, always points into
-//     the target, and matches "a straight line from source to target".
-//   • orthogonal → the axis-aligned final segment (the chord would draw a diagonal
-//     arrow on an L-route). Take it from a baseline ≥ minBase back that's outside
-//     the target body and points inward; fall back to the chord if degenerate.
-export function arrowHeading(poly, source, target, mode, minBase = 10) {
+// The TIP is always poly[last] (on the border, on the drawn line). The HEADING:
+//   • orthogonal → the axis-aligned final segment (poly[last]−poly[last-1]); its port
+//     stub is always outside the body and axis-aligned, so the arrow lines up with the
+//     incoming run. (A chord would draw a diagonal arrow on an L-route.)
+//   • curved / straight → follow the curve via a SECANT over the last `back` px of arc
+//     length, so the arrow *continues the line* (the curve's end-tangent is ~10° off the
+//     chord; using the raw chord makes longer edges look wrong). The naive last sample is
+//     no good — it jitters (a ~1px tail → atan2 spins) and the clipped tail can point
+//     backward — so trust the secant only when it's reliable: pointing inward AND within
+//     ~35° of the chord. On a very short / strongly-bulged edge (where the secant wraps
+//     the bulge) fall back to the stable chord.
+export function arrowHeading(poly, source, target, mode, back = 11) {
   const tip = poly[poly.length - 1], first = poly[0];
   const room = Math.hypot(tip.x - first.x, tip.y - first.y);   // endpoint span, not arc length
   if (room < 5) return null;
   let ux = 0, uy = 0;
   if (mode === "orthogonal") {
-    let acc = 0;
+    const prev = poly[poly.length - 2];
+    const dx = tip.x - prev.x, dy = tip.y - prev.y, L = Math.hypot(dx, dy);
+    if (L > 1e-3) { ux = dx/L; uy = dy/L; }              // axis stub → already inward
+  } else {
+    // secant base: walk back `back` px of arc length from the tip
+    let acc = 0, px = tip.x, py = tip.y, rx = first.x, ry = first.y;
     for (let i = poly.length - 2; i >= 0; i--) {
-      acc += Math.hypot(poly[i+1].x - poly[i].x, poly[i+1].y - poly[i].y);
-      if (acc >= minBase && !(target && Nodes.inBody(target, poly[i].x, poly[i].y))) {
-        const dx = tip.x - poly[i].x, dy = tip.y - poly[i].y, L = Math.hypot(dx, dy);
-        if (L > 1e-3 && target && dx*(target.x - tip.x) + dy*(target.y - tip.y) > 0) { ux = dx/L; uy = dy/L; }
-        break;
-      }
+      const q = poly[i], seg = Math.hypot(px - q.x, py - q.y);
+      if (acc + seg >= back) { const t = (back - acc) / seg; rx = px - (px - q.x)*t; ry = py - (py - q.y)*t; break; }
+      acc += seg; px = q.x; py = q.y; rx = q.x; ry = q.y;
+    }
+    const dx = tip.x - rx, dy = tip.y - ry, L = Math.hypot(dx, dy);
+    const cdx = target.x - source.x, cdy = target.y - source.y, cL = Math.hypot(cdx, cdy);
+    if (L > 1e-3 && cL > 1e-3) {
+      const sx = dx/L, sy = dy/L;
+      const inward = sx*(target.x - tip.x) + sy*(target.y - tip.y) > 0;
+      const aligned = (sx*cdx + sy*cdy) / cL > 0.82;     // within ~35° of the chord
+      if (inward && aligned) { ux = sx; uy = sy; }
     }
   }
-  if (ux === 0 && uy === 0) {                           // chord (curved/straight + orthogonal fallback)
+  if (ux === 0 && uy === 0) {                            // chord fallback (always inward)
     const dx = target.x - source.x, dy = target.y - source.y, L = Math.hypot(dx, dy);
     if (L < 1e-3) return null;
     ux = dx/L; uy = dy/L;

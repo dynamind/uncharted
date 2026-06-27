@@ -334,21 +334,31 @@ describe("arrowHeading is robust near touching / overlapping nodes", () => {
     expect(bad).toEqual([]);
   });
 
-  // The curve tangent is unreliable, so curved/straight arrows follow the straight
-  // source→target chord exactly — never the bulging tangent.
-  it("curved/straight heading equals the source→target chord", () => {
-    for (const mode of ["curved", "straight"]) {
-      const n = [{ x: 120, y: 120, id: 0 }, { x: 300, y: 260, id: 1 }];   // a bulging curve
-      const poly = edgeGeometry({ nodes: n, edges: [{ source: 0, target: 1 }] }, mode,
-        { x0: 0, y0: 0, x1: 600, y1: 600 })[0].poly;
-      const h = arrowHeading(poly, n[0], n[1], mode);
-      const cL = Math.hypot(n[1].x - n[0].x, n[1].y - n[0].y);
-      expect(h.ux).toBeCloseTo((n[1].x - n[0].x) / cL, 6);
-      expect(h.uy).toBeCloseTo((n[1].y - n[0].y) / cL, 6);
-      // tip stays glued to the rendered line end (on the target border)
-      expect(h.tx).toBeCloseTo(poly[poly.length - 1].x, 6);
-      expect(h.ty).toBeCloseTo(poly[poly.length - 1].y, 6);
-    }
+  // On a long curved edge the arrow follows the curve (the secant), so it *continues
+  // the line* — a small but real offset from the raw chord, not the chord itself.
+  it("a long curved arrow follows the curve, not the raw chord", () => {
+    const n = [{ x: 120, y: 120, id: 0 }, { x: 460, y: 380, id: 1 }];   // long, bulging
+    const poly = edgeGeometry({ nodes: n, edges: [{ source: 0, target: 1 }] }, "curved",
+      { x0: 0, y0: 0, x1: 800, y1: 800 })[0].poly;
+    const h = arrowHeading(poly, n[0], n[1], "curved");
+    const cL = Math.hypot(n[1].x - n[0].x, n[1].y - n[0].y);
+    const cos = h.ux * (n[1].x - n[0].x) / cL + h.uy * (n[1].y - n[0].y) / cL;
+    const devDeg = Math.acos(Math.min(1, cos)) * 180 / Math.PI;
+    expect(devDeg).toBeGreaterThan(2);                  // follows the curve, not the bare chord
+    expect(devDeg).toBeLessThan(25);                    // ...but still a gentle, sane angle
+    expect(h.tx).toBeCloseTo(poly[poly.length - 1].x, 6);   // tip glued to the line end
+    expect(h.ty).toBeCloseTo(poly[poly.length - 1].y, 6);
+  });
+
+  // Straight routing has a 2-point polyline, so the secant IS the chord.
+  it("a straight arrow heads exactly along the chord", () => {
+    const n = [{ x: 120, y: 120, id: 0 }, { x: 460, y: 380, id: 1 }];
+    const poly = edgeGeometry({ nodes: n, edges: [{ source: 0, target: 1 }] }, "straight",
+      { x0: 0, y0: 0, x1: 800, y1: 800 })[0].poly;
+    const h = arrowHeading(poly, n[0], n[1], "straight");
+    const cL = Math.hypot(n[1].x - n[0].x, n[1].y - n[0].y);
+    expect(h.ux).toBeCloseTo((n[1].x - n[0].x) / cL, 6);
+    expect(h.uy).toBeCloseTo((n[1].y - n[0].y) / cL, 6);
   });
 
   it("orthogonal heading is axis-aligned (not the diagonal chord) on an L-route", () => {
