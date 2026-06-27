@@ -42,9 +42,12 @@ attack it.
   aligned **ports** (route between points *outside* the boxes — never let the jog
   happen inside a box, or the endpoint clip turns it into a diagonal). Ports prefer
   **top/bottom** for cross-layer edges (flowchart flow) and **lean** toward the other
-  endpoint (clamped in the side) so the trunk stays centred/straight while branches
-  enter from the top with a mid-way jog. Constructive solvers **snap exactly onto their
-  on-grid targets when settled**, so ports/edges line up to the pixel (no ~1px drift).
+  endpoint (clamped in the side) **only when that side carries >1 edge** (single-edge
+  sides stay centred, so pass-throughs connect cleanly instead of skewering the box).
+  The attach point's perpendicular coord is the **shape border** (`borderPerp`): rect =
+  flat, **diamond = angled face** (tapers to the vertex), circle = round — so a leaning
+  port on a decision diamond meets its slanted edge, not the bounding box. Constructive
+  solvers **snap exactly onto on-grid targets when settled**, so edges line up to the px.
 - **CROSSINGS ARE COMPUTED ON THE ACTUAL RENDERED POLYLINES** (`Renderer.crossings`,
   bbox prefilter + segment test) — the metric AND the hops read from the same points,
   so a hop only ever appears where the drawn lines truly cross. (This replaced the old

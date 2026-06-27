@@ -1124,20 +1124,34 @@ function orthogonalGeometry(graph, bounds) {
     sideCount[e.target][sideOf(nodes[e.target], nodes[e.source])]++;
   }
 
-  // A port: where the edge meets the box. A side with ONE edge connects at its
+  // How far the node's border sits from centre, perpendicular to a side, at a
+  // distance `off` ALONG that side. Rect = flat; diamond = angled faces (taper
+  // to the vertices); circle = round. This is what makes a diamond's edges meet
+  // its angled edge instead of its (empty) bounding-box corner.
+  function borderPerp(shape, off, along, perp) {
+    if (shape === "diamond") return perp * (1 - Math.min(1, Math.abs(off) / along));
+    if (shape === "circle")  return Math.sqrt(Math.max(0, perp*perp - off*off));
+    return perp;                                   // rect
+  }
+  // A port: where the edge meets the node. A side with ONE edge connects at its
   // centre (clean straight pass-through). A side with several edges leans each
   // toward its own endpoint, so branches fan out / merges spread — and because
   // the lean is toward the target, the trunk (target straight below) stays at 0.
   function port(n, idx, toward) {
     const { hw, hh } = Nodes.half(n);
+    const shape = n.shape || "circle";
     const side = sideOf(n, toward), multi = sideCount[idx][side] > 1;
     if (side === "t" || side === "b") {
       const lean = multi ? clamp(toward.x - n.x, -hw*0.6, hw*0.6) : 0;
-      const px = wx(gx(n.x + lean)), y = n.y + (side === "b" ? hh : -hh);
+      const px = wx(gx(n.x + lean));
+      const by = borderPerp(shape, px - n.x, hw, hh);   // border height at this x
+      const y = n.y + (side === "b" ? by : -by);
       return { x: px, y, col: gx(px), row: gy(y), step: side === "b" ? [0,1] : [0,-1], vert: true };
     }
     const lean = multi ? clamp(toward.y - n.y, -hh*0.6, hh*0.6) : 0;
-    const py = wy(gy(n.y + lean)), x = n.x + (side === "r" ? hw : -hw);
+    const py = wy(gy(n.y + lean));
+    const bx = borderPerp(shape, py - n.y, hh, hw);      // border width at this y
+    const x = n.x + (side === "r" ? bx : -bx);
     return { x, y: py, col: gx(x), row: gy(py), step: side === "r" ? [1,0] : [-1,0], vert: false };
   }
   // first free cell stepping outward from a port (past its node's margin)
