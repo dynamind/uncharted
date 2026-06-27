@@ -210,44 +210,49 @@ export function orthogonalGeometry(graph, bounds) {
     return simplify(poly);
   }
 
-  // PHASE 1 — per edge: FIX the target's entry side from the box relationship,
-  // then MINIMISE BENDS over the source's exit side.
-  //   • vertically separated boxes  → target entered top/bottom (down/up flow);
-  //   • otherwise (level / overlap) → target entered on the facing left/right side.
-  // The source then exits whichever side gives fewer bends — so B below & off to
-  // the side becomes "side-of-A → top-of-B" (1 bend), B directly below stays a
-  // straight trunk, and level boxes stay side-to-side. If the best is still >2
-  // bends (boxes wedged tight), try the other entry side and same-side U-turns.
-  const evalSides = (a, b, s, pref) => {
+  // PHASE 1 — choose sides per edge by MINIMISING BENDS over the candidate pairs.
+  //   • Stacked (boxes vertically separated): try both source exits × both target
+  //     entries. A bend tie prefers top-entry / vertical (down-flow), so we get a
+  //     straight trunk when aligned, a 1-bend L "side-of-A → top-of-B" when B is
+  //     well off to the side, and a 1-bend "bottom-of-A → side-of-B" when B is
+  //     mostly below but slightly aside (entering the side beats the 2-bend S).
+  //   • Level (overlap vertically): side-to-side only — don't let a coincidentally
+  //     1-bend bottom exit flip in as you drag.
+  //   • Tight/degenerate (best still >2 bends): fall back to all pairs + same-side
+  //     U-turns, ranked by GRID-QUANTISED length so near-equal options (t/t vs b/b)
+  //     don't flicker on sub-pixel changes; a fixed order breaks exact ties.
+  // length bucketed to a coarse DEADBAND so near-equal options (t/t vs b/b) don't
+  // flicker as a box moves by a pixel; within a bucket a fixed candidate order (idx)
+  // decides, so the choice is stable. Length only wins when it CLEARLY differs.
+  const lenBucket = poly => Math.round(polyLen(poly) / (C.cell * 4));
+  const evalSides = (a, b, s, pref, idx) => {
     const poly = routePorts(makePort(a, s[0], 0), makePort(b, s[1], 0));
     const bends = poly ? poly.length - 2 : Infinity;
-    return { s, bends, score: bends * 1e7 + pref * 1e4 + (poly ? polyLen(poly) : 1e9) };
+    const score = poly ? bends*1e7 + pref*1e4 + lenBucket(poly)*100 + idx : Infinity;
+    return { s, bends, score };
   };
   const sides = edges.map(e => {
     const a = nodes[e.source], b = nodes[e.target];
     const ha = Nodes.half(a), hb = Nodes.half(b);
     const vGap = Math.max((b.y-hb.hh)-(a.y+ha.hh), (a.y-ha.hh)-(b.y+hb.hh));
     const below = b.y >= a.y, right = b.x >= a.x;
-    const tgt = vGap > 0 ? (below ? "t" : "b") : (right ? "l" : "r");  // fixed target entry
-    const saV = below ? "b" : "t", saH = right ? "r" : "l";           // source exit options
-    // Stacked (target entered top/bottom): bend-min the source exit — vertical for
-    // a straight trunk when aligned, the side for a 1-bend L when B is off to the
-    // side. Level (target entered on a side): keep the source on the SAME side too
-    // (side-to-side) — don't let a coincidentally-1-bend bottom exit flip in as you
-    // drag, which both looks wrong for level boxes and causes a jump.
-    const cands = (tgt === "t" || tgt === "b") ? [[saV, tgt], [saH, tgt]] : [[saH, tgt]];
+    const saV = below ? "b" : "t", saH = right ? "r" : "l";   // source sides toward B
+    const tbV = below ? "t" : "b", tbH = right ? "l" : "r";   // target sides toward A
+    const cands = vGap > 0
+      ? [[saV, tbV, 0], [saH, tbV, 1], [saV, tbH, 2], [saH, tbH, 3]]   // stacked
+      : [[saH, tbH, 0]];                                               // level
     let best = null;
-    cands.forEach((s, i) => {                                         // bend-min the source exit
-      const r = evalSides(a, b, s, i);
+    cands.forEach(([s0, s1, p], i) => {
+      const r = evalSides(a, b, [s0, s1], p, i);
       if (!best || r.score < best.score) best = r;
     });
-    if (best.bends > 2) {                                             // tight: other entry + U-turns
-      const alt = vGap > 0 ? (right ? "l" : "r") : (below ? "t" : "b");
-      const fb = [[saV, alt, 4], [saH, alt, 4], ["t","t",6], ["b","b",6], ["l","l",6], ["r","r",6]];
-      for (const [s0, s1, p] of fb) {
-        const r = evalSides(a, b, [s0, s1], p);
+    if (best.bends > 2) {                                              // tight → go around
+      const fb = [["b","b"], ["t","t"], ["r","r"], ["l","l"],   // b/b wins U-turn ties (down-flow)
+                  [saV,tbV], [saH,tbV], [saV,tbH], [saH,tbH]];
+      fb.forEach((s, i) => {
+        const r = evalSides(a, b, s, 50, i);
         if (r.score < best.score) best = r;
-      }
+      });
     }
     return best.s;
   });

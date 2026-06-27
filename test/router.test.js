@@ -88,6 +88,31 @@ describe("pixel sweep — a side-by-side edge never exceeds 2 bends", () => {
   });
 });
 
+describe("target side-entry (the bottom-end mirror) and U-turn stability", () => {
+  // When the side→top route is blocked (an obstacle beside A), entering B from its
+  // SIDE is 1 bend vs the 2-bend bottom→top S. This is the merge case in the
+  // flowchart (Reject→Respond, blocked by Parse body).
+  it("enters the target's side when side→top is blocked, saving a bend", () => {
+    const A = rect(290, 455), B = rect(425, 845), obstacle = rect(425, 455);
+    const g = orthogonalGeometry(
+      { nodes: [{...A,id:0},{...B,id:1},{...obstacle,id:2}], edges: [{source:0,target:1}] },
+      { x0: 56, y0: 56, x1: 780, y1: 980 })[0];
+    expect(g.sides).toEqual(["b", "l"]);     // bottom-of-A → side-of-B
+    expect(bendCount(g.poly)).toBe(1);
+  });
+
+  // The t/t vs b/b U-turn used for tight side-by-side boxes must NOT flicker as the
+  // box is dragged: across the overlapping band the chosen sides stay constant.
+  it("a tight side-by-side U-turn stays on one choice across a vertical sweep", () => {
+    const sidesAt = dy => orthogonalGeometry(
+      { nodes: [{...rect(220,400),id:0}, {...rect(328,400+dy),id:1}], edges: [{source:0,target:1}] },
+      { x0: 0, y0: 0, x1: 1000, y1: 900 })[0].sides.join("");
+    const seen = new Set();
+    for (let dy = -30; dy <= 30; dy++) seen.add(sidesAt(dy));   // within the overlap band
+    expect(seen.size).toBe(1);                                   // no flicker
+  });
+});
+
 describe("stacked boxes keep flowing downward (flowchart aesthetic)", () => {
   it("B directly below A → bottom/top, straight (0 bends)", () => {
     const g = edge(rect(300, 100), rect(300, 320));

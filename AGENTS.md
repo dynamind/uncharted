@@ -55,17 +55,19 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   grid **A\*** (turn-penalised) around node obstacles (+margin), connected via axis-
   aligned **ports** (route between points *outside* the boxes — never let the jog
   happen inside a box, or the endpoint clip turns it into a diagonal). Side choice
-  per edge: **FIX the target's entry side** from the box relationship (vertically
-  separated ⇒ enter top/bottom = down/up flow; otherwise enter the facing left/right
-  side), then **MINIMISE BENDS over the source's exit** by routing the candidates.
-  - Stacked (vertical entry): source exit ∈ {vertical, horizontal} → straight trunk when
-    aligned, a **1-bend L** (side-of-A → top-of-B) when B is off to the side.
-  - Level (side entry): source exit is the matching side (side-to-side); we do NOT
-    bend-min into a bottom exit, because that flips in/out as you drag (looks wrong +
-    jumps).
-  - If the best is still >2 bends (boxes wedged tight): try the other entry side and the
-    four **same-side U-turns** (top-to-top / bottom-to-bottom / …) that go AROUND the gap
-    in 2 bends instead of wrapping in 4.
+  per edge = **MINIMISE BENDS** over candidate (sourceSide, targetSide) pairs by
+  actually routing them; a bend tie prefers down-flow (target top / vertical).
+  - Stacked (boxes vertically separated): try both source exits × both target entries
+    → straight trunk when aligned; **1-bend L** "side-of-A → top-of-B" when B is well
+    off to the side; **1-bend "bottom-of-A → side-of-B"** when B is mostly below but
+    the side→top route is blocked (the flowchart merge: Reject/Error enter Respond's
+    sides). Both ends are bend-minimised, not just the source.
+  - Level (overlap vertically): side-to-side only — do NOT bend-min into a bottom exit;
+    it flips in/out as you drag (looks wrong + jumps).
+  - Tight/degenerate (best still >2 bends): all pairs + four **same-side U-turns**
+    (top-to-top / …) ranked by **grid-quantised length** (a coarse deadband) so the
+    near-equal t/t vs b/b choice doesn't flicker pixel-to-pixel; a fixed order
+    (b/b first) breaks ties deterministically.
   - A* is seeded with the **source stub direction** (`dirOf(pa.step)`); without it A*
     turns freely at the first cell and wastes the stub, adding a phantom bend.
   - Several edges leaving the SAME side are ordered by **fan angle to their targets**
