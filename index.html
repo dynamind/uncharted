@@ -251,7 +251,14 @@
 
     <div class="group">
       <div class="label">Display</div>
-      <label class="toggle"><input type="checkbox" id="tg-curve" checked /><span class="box"></span><span class="t">Curved edges</span></label>
+      <div class="row" style="margin-top:0">
+        <label>Edge routing</label>
+        <select id="sel-routing" style="flex:1">
+          <option value="straight">Straight</option>
+          <option value="curved" selected>Curved</option>
+          <option value="orthogonal">Orthogonal</option>
+        </select>
+      </div>
       <label class="toggle"><input type="checkbox" id="tg-hops" checked /><span class="box"></span><span class="t">Crossing hops</span></label>
       <label class="toggle"><input type="checkbox" id="tg-labels" /><span class="box"></span><span class="t">Node labels</span></label>
     </div>
@@ -734,70 +741,130 @@ LayoutEngine.register("circular", makeConstructive("circular", circularTargets))
 /* ---------------------------------------------------------------------------
    4. Renderer
    ------------------------------------------------------------------------- */
-const Renderer = (() => {
-  const NODE_R = 8;
-  const SAMPLES = 18;        // bezier samples per edge (curve + crossing detect)
-  const HOP_R = 5.5;
+/* Node geometry — size, shape, boundary clipping, hit-testing. Nodes may be
+   circles (graph nodes) or rect / diamond boxes (flowchart nodes). */
+const Nodes = {
+  R: 8,
+  half(n) {
+    if (n.shape === "rect" || n.shape === "diamond") return { hw: n.w/2, hh: n.h/2 };
+    return { hw: this.R, hh: this.R };
+  },
+  // point on the node's border along the ray from its centre toward (tx,ty)
+  boundary(n, tx, ty) {
+    const dx = tx - n.x, dy = ty - n.y, L = Math.hypot(dx, dy) || 1;
+    const ux = dx/L, uy = dy/L, { hw, hh } = this.half(n);
+    let s;
+    if (n.shape === "rect")
+      s = Math.min(hw / (Math.abs(ux) || 1e-6), hh / (Math.abs(uy) || 1e-6));
+    else if (n.shape === "diamond")
+      s = 1 / ((Math.abs(ux)/hw) + (Math.abs(uy)/hh) + 1e-9);
+    else
+      s = this.R;
+    return { x: n.x + ux*s, y: n.y + uy*s };
+  },
+  hit(n, x, y) {
+    if (n.shape === "rect" || n.shape === "diamond") {
+      const { hw, hh } = this.half(n);
+      return Math.abs(x - n.x) <= hw + 4 && Math.abs(y - n.y) <= hh + 4;
+    }
+    return Geo.dist(x, y, n.x, n.y) <= this.R + 5;
+  },
+};
 
-  // Build per-edge geometry (a polyline) for the current node positions.
-  function edgeGeometry(graph, curved) {
-    const { nodes, edges } = graph;
-    return edges.map((e, i) => {
-      const a = nodes[e.source], b = nodes[e.target];
-      const p0 = { x: a.x, y: a.y }, p1 = { x: b.x, y: b.y };
-      if (!curved) return { poly: [p0, p1], a, b };
-      const mx = (p0.x+p1.x)/2, my = (p0.y+p1.y)/2;
-      const dx = p1.x-p0.x, dy = p1.y-p0.y;
-      const len = Math.hypot(dx, dy) || 1;
-      const off = Math.min(34, len*0.11) * ((i % 2) ? 1 : -1);
-      const c = { x: mx - dy/len*off, y: my + dx/len*off };
-      return { poly: Geo.sampleQuad(p0, c, p1, SAMPLES), a, b, c };
-    });
+const Renderer = (() => {
+  const SAMPLES = 18;        // bezier samples per curved edge
+  const HOP_R = 5;
+
+  // ---- crossing detection on the ACTUAL rendered geometry -----------------
+  // Hops and the live metric both read from here, so a hop only ever appears
+  // where the drawn lines truly cross — never off-position, flipped, or phantom.
+  function bbox(poly) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const p of poly) {
+      if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x;
+      if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y;
+    }
+    return { x0, y0, x1, y1 };
+  }
+  function polyIntersections(pa, pb) {
+    const res = [];
+    for (let i = 1; i < pa.length; i++) {
+      const a1 = pa[i-1], a2 = pa[i];
+      for (let j = 1; j < pb.length; j++) {
+        const b1 = pb[j-1], b2 = pb[j];
+        const h = Geo.segInt(a1.x,a1.y,a2.x,a2.y, b1.x,b1.y,b2.x,b2.y);
+        if (h) res.push(h);
+      }
+    }
+    return res;
+  }
+  function crossings(geom) {
+    const out = [], bb = geom.map(g => bbox(g.poly));
+    for (let i = 0; i < geom.length; i++) {
+      const A = geom[i], ba = bb[i];
+      for (let j = i+1; j < geom.length; j++) {
+        const B = geom[j];
+        if (A.a===B.a || A.a===B.b || A.b===B.a || A.b===B.b) continue;  // adjacent
+        const bj = bb[j];
+        if (ba.x1<bj.x0 || bj.x1<ba.x0 || ba.y1<bj.y0 || bj.y1<ba.y0) continue;
+        for (const h of polyIntersections(A.poly, B.poly))
+          out.push({ x: h.x, y: h.y, eA: i, eB: j });
+      }
+    }
+    return out;
   }
 
   function draw(ctx, view, graph, geom, crossings, opts) {
     ctx.clearRect(0, 0, view.w, view.h);
 
-    // crossing points grouped by the edge that should hop *over*
+    // group crossings by the edge that should bridge *over* (higher index)
     const hopsByEdge = new Map();
     if (opts.hops) {
       for (const c of crossings) {
-        const over = c.eA > c.eB ? c.eA : c.eB; // deterministic: higher index hops
+        const over = c.eA > c.eB ? c.eA : c.eB;
         if (!hopsByEdge.has(over)) hopsByEdge.set(over, []);
         hopsByEdge.get(over).push(c);
       }
     }
 
-    // edges
-    ctx.lineWidth = 1.6;
-    ctx.lineCap = "round";
+    ctx.lineWidth = 1.6; ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.strokeStyle = getCss("--edge");
     for (let i = 0; i < geom.length; i++) {
-      ctx.strokeStyle = getCss("--edge");
       const hops = hopsByEdge.get(i);
       if (hops && hops.length) drawPolyWithHops(ctx, geom[i].poly, hops);
       else drawPoly(ctx, geom[i].poly);
     }
 
-    // crossing markers (faint)
-    if (opts.hops) {
-      ctx.fillStyle = "rgba(255,180,84,0.0)";
-    }
+    for (const n of graph.nodes) drawNode(ctx, n, opts);
+  }
 
-    // nodes
-    for (const n of graph.nodes) {
+  function drawNode(ctx, n, opts) {
+    const shape = n.shape || "circle";
+    ctx.lineWidth = 2;
+    ctx.fillStyle   = shape === "circle" ? getCss("--node") : getCss("--panel-2");
+    ctx.strokeStyle = n.fixed ? getCss("--accent")
+                    : shape === "diamond" ? getCss("--warn")
+                    : shape === "rect" ? getCss("--accent-2")
+                    : getCss("--node-ring");
+    const { hw, hh } = Nodes.half(n);
+    if (shape === "rect") {
+      ctx.beginPath(); ctx.roundRect(n.x-hw, n.y-hh, hw*2, hh*2, 7); ctx.fill(); ctx.stroke();
+    } else if (shape === "diamond") {
       ctx.beginPath();
-      ctx.arc(n.x, n.y, NODE_R, 0, Math.PI*2);
-      ctx.fillStyle = getCss("--node");
-      ctx.fill();
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = n.fixed ? getCss("--accent") : getCss("--node-ring");
-      ctx.stroke();
-      if (opts.labels) {
-        ctx.fillStyle = getCss("--ink");
-        ctx.font = "10px " + getCss("--mono");
-        ctx.textAlign = "center"; ctx.textBaseline = "middle";
-        ctx.fillText(String(n.id), n.x, n.y - NODE_R - 8);
-      }
+      ctx.moveTo(n.x, n.y-hh); ctx.lineTo(n.x+hw, n.y);
+      ctx.lineTo(n.x, n.y+hh); ctx.lineTo(n.x-hw, n.y); ctx.closePath();
+      ctx.fill(); ctx.stroke();
+    } else {
+      ctx.beginPath(); ctx.arc(n.x, n.y, Nodes.R, 0, Math.PI*2); ctx.fill(); ctx.stroke();
+    }
+    if (n.label) {                       // flowchart label, inside the box
+      ctx.fillStyle = getCss("--ink"); ctx.font = "600 11px " + getCss("--sans");
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(n.label, n.x, n.y);
+    } else if (opts.labels) {            // debug id, above the node
+      ctx.fillStyle = getCss("--ink-dim"); ctx.font = "10px " + getCss("--mono");
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(String(n.id), n.x, n.y - Nodes.R - 8);
     }
   }
 
@@ -808,47 +875,80 @@ const Renderer = (() => {
     ctx.stroke();
   }
 
-  // Draw the curve, lifting into a small semicircular bridge at each crossing.
-  // Crossings live on the straight chords, so we snap every hop to the nearest
-  // vertex of this (possibly curved) polyline — the bump always lands on the line.
-  function drawPolyWithHops(ctx, poly, hops) {
-    // assign each hop to its closest interior segment, then sort along the line
-    const bumps = [];
-    for (const h of hops) {
-      let best = 1, bd = Infinity;
-      for (let i = 1; i < poly.length - 1; i++) {
-        const d = Geo.dist(h.x, h.y, poly[i].x, poly[i].y);
-        if (d < bd) { bd = d; best = i; }
+  // distance from point to a segment + the parameter t of the foot
+  function projToSeg(p, a, b) {
+    const dx = b.x-a.x, dy = b.y-a.y, L2 = dx*dx + dy*dy || 1;
+    let t = ((p.x-a.x)*dx + (p.y-a.y)*dy) / L2;
+    t = t < 0 ? 0 : t > 1 ? 1 : t;
+    const x = a.x + dx*t, y = a.y + dy*t;
+    return { t, d: Math.hypot(p.x-x, p.y-y) };
+  }
+
+  // Draw the polyline, lifting into a small semicircular bridge at each crossing.
+  // The bridge sits exactly on the real intersection point and always bulges to
+  // a consistent side (up, or right for vertical runs) — no upside-down hops.
+  function drawPolyWithHops(ctx, poly, pts) {
+    const bumps = pts.map(pt => {
+      let bk = 1, bt = 0, bd = Infinity;
+      for (let k = 1; k < poly.length; k++) {
+        const r = projToSeg(pt, poly[k-1], poly[k]);
+        if (r.d < bd) { bd = r.d; bk = k; bt = r.t; }
       }
-      bumps.push(best);
-    }
-    bumps.sort((a, b) => a - b);
+      return { k: bk, t: bt };
+    }).sort((a, b) => a.k - b.k || a.t - b.t);
 
     ctx.beginPath();
     ctx.moveTo(poly[0].x, poly[0].y);
     let bi = 0;
-    for (let i = 1; i < poly.length; i++) {
-      const q = poly[i-1], p = poly[i];
-      if (bi < bumps.length && bumps[bi] === i) {
-        bi++;
-        const mx = (q.x+p.x)/2, my = (q.y+p.y)/2;       // bridge over segment midpoint
-        const dirx = p.x-q.x, diry = p.y-q.y;
-        const L = Math.hypot(dirx, diry) || 1;
-        const ux = dirx/L, uy = diry/L;
-        ctx.lineTo(mx - ux*HOP_R, my - uy*HOP_R);
-        const ang = Math.atan2(uy, ux);
-        ctx.arc(mx, my, HOP_R, ang - Math.PI, ang, false);
-        ctx.moveTo(mx + ux*HOP_R, my + uy*HOP_R);
-        ctx.lineTo(p.x, p.y);
-      } else {
-        ctx.lineTo(p.x, p.y);
+    for (let k = 1; k < poly.length; k++) {
+      const q = poly[k-1], p = poly[k];
+      const dx = p.x-q.x, dy = p.y-q.y, L = Math.hypot(dx, dy) || 1;
+      const ux = dx/L, uy = dy/L;
+      // consistent outward normal: prefer pointing up; for vertical runs, right
+      let nx = uy, ny = -ux;
+      if (ny > 0.001) { nx = -nx; ny = -ny; }
+      else if (Math.abs(ny) <= 0.001 && nx < 0) { nx = -nx; ny = -ny; }
+      const anti = (ux*ny - uy*nx) < 0;
+      while (bi < bumps.length && bumps[bi].k === k) {
+        const b = bumps[bi++];
+        const at = L * b.t;
+        const cx = q.x + ux*at, cy = q.y + uy*at;
+        if (at > HOP_R) ctx.lineTo(cx - ux*HOP_R, cy - uy*HOP_R);
+        ctx.arc(cx, cy, HOP_R, Math.atan2(-uy,-ux), Math.atan2(uy,ux), anti);
+        ctx.moveTo(cx + ux*HOP_R, cy + uy*HOP_R);
       }
+      ctx.lineTo(p.x, p.y);
     }
     ctx.stroke();
   }
 
-  return { edgeGeometry, draw, NODE_R, SAMPLES };
+  return { crossings, draw, SAMPLES };
 })();
+
+/* Edge routing — turns node positions into rendered polylines. Modes:
+   straight | curved | orthogonal. Endpoints are clipped to node borders so a
+   line meets the box edge, not its centre. (orthogonal added below) */
+function edgeGeometry(graph, mode) {
+  const { nodes, edges } = graph;
+  return edges.map((e, i) => {
+    const a = nodes[e.source], b = nodes[e.target];
+    let poly;
+    if (mode === "curved") {
+      const p0 = { x: a.x, y: a.y }, p1 = { x: b.x, y: b.y };
+      const mx = (p0.x+p1.x)/2, my = (p0.y+p1.y)/2;
+      const dx = p1.x-p0.x, dy = p1.y-p0.y, len = Math.hypot(dx, dy) || 1;
+      const off = Math.min(34, len*0.11) * ((i % 2) ? 1 : -1);
+      const c = { x: mx - dy/len*off, y: my + dx/len*off };
+      poly = Geo.sampleQuad(p0, c, p1, Renderer.SAMPLES);
+      poly[0] = Nodes.boundary(a, poly[1].x, poly[1].y);
+      poly[poly.length-1] = Nodes.boundary(b, poly[poly.length-2].x, poly[poly.length-2].y);
+    } else {
+      poly = [Nodes.boundary(a, b.x, b.y), Nodes.boundary(b, a.x, a.y)];
+    }
+    return { poly, a, b };
+  });
+}
+Renderer.edgeGeometry = edgeGeometry;
 
 // read a CSS custom property (cached)
 const _css = {};
@@ -879,7 +979,7 @@ const App = (() => {
       cooling: 0.97,                           // annealing / hillclimb schedule
       weights: { cross: 1, len: 1, overlap: 1 }, // cost objective weights
     },
-    opts: { curve: true, hops: true, labels: false },
+    opts: { routing: "curved", hops: true, labels: false },
     view: { w: 0, h: 0, dpr: 1 },
     bounds: { x0: 0, y0: 0, x1: 0, y1: 0 },
   };
@@ -916,10 +1016,10 @@ const App = (() => {
   }
 
   function recompute() {
-    // Objective.crossings (straight chords) is the single source of truth for
-    // the metric AND the hops; edges are merely drawn curved.
-    state.geom = Renderer.edgeGeometry(state.graph, state.opts.curve);
-    state.crossings = Objective.crossings(state.graph);
+    // Geometry is routed first; crossings (metric + hops) are then read off the
+    // ACTUAL polylines, so what you count is exactly what you see.
+    state.geom = Renderer.edgeGeometry(state.graph, state.opts.routing);
+    state.crossings = Renderer.crossings(state.geom);
   }
 
   function cost() {
@@ -969,8 +1069,7 @@ const App = (() => {
   /* -------- interaction: drag nodes -------- */
   let drag = null;
   function nodeAt(x, y) {
-    for (const n of state.graph.nodes)
-      if (Geo.dist(x, y, n.x, n.y) <= Renderer.NODE_R + 5) return n;
+    for (const n of state.graph.nodes) if (Nodes.hit(n, x, y)) return n;
     return null;
   }
   function ptr(e) {
@@ -1019,7 +1118,7 @@ const App = (() => {
       document.getElementById("val-speed").textContent = sp.value;
     });
 
-    document.getElementById("tg-curve").addEventListener("change", e => state.opts.curve = e.target.checked);
+    document.getElementById("sel-routing").addEventListener("change", e => state.opts.routing = e.target.value);
     document.getElementById("tg-hops").addEventListener("change", e => state.opts.hops = e.target.checked);
     document.getElementById("tg-labels").addEventListener("change", e => state.opts.labels = e.target.checked);
 
