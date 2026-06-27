@@ -61,6 +61,14 @@ export const Nodes = {
     }
     return Geo.dist(x, y, n.x, n.y) <= this.R + 5;
   },
+  // is point (x,y) inside node n's body? (convex shape test, no margin)
+  inBody(n, x, y) {
+    const { hw, hh } = this.half(n);
+    const dx = x - n.x, dy = y - n.y, shape = n.shape || "circle";
+    if (shape === "circle")  return dx*dx + dy*dy <= this.R*this.R;
+    if (shape === "diamond") return Math.abs(dx)/hw + Math.abs(dy)/hh <= 1;
+    return Math.abs(dx) <= hw && Math.abs(dy) <= hh;          // rect
+  },
   // Does segment (x1,y1)->(x2,y2) pass THROUGH node n's body (not merely graze a
   // corner)? An edge that runs across a non-incident node's interior is, visually
   // and combinatorially, a crossing — without this a solver can hide an edge

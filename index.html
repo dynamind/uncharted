@@ -934,18 +934,28 @@ const Renderer = (() => {
     // border (its tip kisses the border; the body points back along the edge).
     if (opts.arrows) {
       ctx.fillStyle = getCss("--edge");
-      for (let i = 0; i < geom.length; i++) drawArrowhead(ctx, geom[i].poly);
+      for (let i = 0; i < geom.length; i++) drawArrowhead(ctx, geom[i].poly, geom[i].b);
     }
   }
 
   // Directed glyph at the TARGET end (poly[last], already on the node border).
-  // Heading = the final segment's direction: a point at radius ARROW_LEN back up
-  // the line gives the triangle's base, the tip stays on the border. separateLanes
-  // never touches the port stub, so poly[last]-poly[last-1] is the clean entry axis.
+  // Heading = the final segment's direction (a point ARROW_LEN back up the line is
+  // the triangle's base; the tip stays on the border). On SHORT/curved edges the
+  // bezier's last sample can land INSIDE the target node — then poly[last-1] points
+  // the triangle backward over the node, so when the tail vertex is inside the body
+  // we walk further back to the first vertex outside it. Orthogonal/straight tails
+  // stay outside the target, so they keep the clean final-segment axis (we must not
+  // walk past a near-target corner). separateLanes never touches the port stub.
   const ARROW_LEN = 11, ARROW_HALF = 4.5;
-  function drawArrowhead(ctx, poly) {
-    const tip = poly[poly.length - 1], prev = poly[poly.length - 2];
-    const dx = tip.x - prev.x, dy = tip.y - prev.y, L = Math.hypot(dx, dy);
+  function drawArrowhead(ctx, poly, target) {
+    const tip = poly[poly.length - 1];
+    let ref = poly[poly.length - 2];
+    if (target && Nodes.inBody(target, ref.x, ref.y)) {
+      ref = poly[0];                                  // fallback: whole edge as baseline
+      for (let i = poly.length - 3; i >= 0; i--)
+        if (!Nodes.inBody(target, poly[i].x, poly[i].y)) { ref = poly[i]; break; }
+    }
+    const dx = tip.x - ref.x, dy = tip.y - ref.y, L = Math.hypot(dx, dy);
     if (L < 1e-3) return;
     const ux = dx/L, uy = dy/L;                       // unit heading into the target
     const bx = tip.x - ux*ARROW_LEN, by = tip.y - uy*ARROW_LEN;   // base centre, radius n back

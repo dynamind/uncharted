@@ -175,7 +175,7 @@ approximates it physically; constructive solvers (layered/circular) target struc
   ports (no sibling crossings), A* seeded with the stub direction, grid-quantised length
   (no flicker), **hysteresis** (sticky + drag-steerable), and **channel separation**
   (`separateLanes` — co-running edges fanned into parallel tracks; verified in-browser on
-  K₆). All pinned by 25 Vitest tests
+  K₆). All pinned by 27 Vitest tests
   in `test/router.test.js` — the single best place to understand the routing contract.
   Run `npm test`. After ANY router change, also `npm run build` and check it stays a single
   file (`grep -c '<script src' dist/index.html` == 0).
@@ -196,8 +196,11 @@ approximates it physically; constructive solvers (layered/circular) target struc
 
 Recent work is all DONE: channel separation (`separateLanes`, PHASE 4), edge-through-node
 counts as a crossing (`segHitsBody`/`nodePierces`), and **arrowheads** (renderer-only,
-`drawArrowhead` in `index.html`; filled triangle, tip on `poly[last]`, base a radius back up
-`poly[last]-poly[last-1]`; toggle `tg-arrows`, auto-on for the flowchart). 25 router tests.
+`drawArrowhead` in `index.html`; filled triangle, tip on `poly[last]`, heading from the final
+segment — but if that tail vertex is **inside the target body** (short/curved edges, where
+the bezier's last sample lands in the node, which flips the triangle backward over the leaf)
+it walks back to the first vertex outside, via `Nodes.inBody`; orthogonal/straight tails stay
+outside so they keep the clean axis. Toggle `tg-arrows`, auto-on for the flowchart). 27 router tests.
 
 The `layered` solver places a node in one layer per longest-path rank, but an edge that
 spans more than one layer is drawn as a single long line straight across the intervening
