@@ -1117,11 +1117,42 @@ function orthogonalGeometry(graph, bounds) {
     const dx = toward.x - n.x, dy = toward.y - n.y;
     return Math.abs(dy) > 6 ? (dy > 0 ? "b" : "t") : (dx >= 0 ? "r" : "l");
   };
-  // How many edges leave each side of each node — so we only spread when needed.
-  const sideCount = nodes.map(() => ({ t: 0, b: 0, l: 0, r: 0 }));
-  for (const e of edges) {
-    sideCount[e.source][sideOf(nodes[e.source], nodes[e.target])]++;
-    sideCount[e.target][sideOf(nodes[e.target], nodes[e.source])]++;
+
+  // Pre-assign every edge an attach OFFSET along the node side it uses. Each edge
+  // leans toward its own endpoint, then edges sharing a side are de-collided so
+  // co-directional ones spread into distinct slots instead of stacking on one
+  // point (which looked like a single line skewering the box). A side with one
+  // edge stays centred. Trunk children sit at offset 0 → dead-straight.
+  const SEP = ORTHO.cell + 6;
+  const offAt = new Map();                          // edgeIndex*2 + endpoint → offset
+  {
+    const groups = new Map();                       // nodeIdx + ":" + side → records
+    const add = (ni, side, key, n, other) => {
+      const { hw, hh } = Nodes.half(n);
+      const along = (side === "t" || side === "b") ? hw : hh;
+      const axis  = (side === "t" || side === "b") ? other.x - n.x : other.y - n.y;
+      const g = nodes[ni].shape; const lim = along * (g === "diamond" ? 0.5 : 0.7);
+      const rec = { key, want: clamp(axis, -lim, lim), along };
+      const gk = ni + ":" + side;
+      (groups.get(gk) || groups.set(gk, []).get(gk)).push(rec);
+    };
+    edges.forEach((e, ei) => {
+      const a = nodes[e.source], b = nodes[e.target];
+      add(e.source, sideOf(a, b), ei*2,   a, b);
+      add(e.target, sideOf(b, a), ei*2+1, b, a);
+    });
+    for (const arr of groups.values()) {
+      if (arr.length === 1) { offAt.set(arr[0].key, 0); continue; }   // single → centred
+      arr.sort((p, q) => p.want - q.want);
+      const pos = arr.map(r => r.want);
+      for (let i = 1; i < pos.length; i++) if (pos[i] < pos[i-1] + SEP) pos[i] = pos[i-1] + SEP;
+      for (let i = pos.length-2; i >= 0; i--) if (pos[i] > pos[i+1] - SEP) pos[i] = pos[i+1] - SEP;
+      const lim = arr[0].along * 0.82, span = pos[pos.length-1] - pos[0];
+      if (span > 2*lim) for (let i = 0; i < pos.length; i++) pos[i] = -lim + 2*lim*i/(pos.length-1);
+      else { const sh = pos[0] < -lim ? -lim - pos[0] : pos[pos.length-1] > lim ? lim - pos[pos.length-1] : 0;
+             for (let i = 0; i < pos.length; i++) pos[i] += sh; }
+      arr.forEach((r, i) => offAt.set(r.key, pos[i]));
+    }
   }
 
   // How far the node's border sits from centre, perpendicular to a side, at a
@@ -1133,23 +1164,18 @@ function orthogonalGeometry(graph, bounds) {
     if (shape === "circle")  return Math.sqrt(Math.max(0, perp*perp - off*off));
     return perp;                                   // rect
   }
-  // A port: where the edge meets the node. A side with ONE edge connects at its
-  // centre (clean straight pass-through). A side with several edges leans each
-  // toward its own endpoint, so branches fan out / merges spread — and because
-  // the lean is toward the target, the trunk (target straight below) stays at 0.
-  function port(n, idx, toward) {
+  // A port: where the edge meets the node, using its pre-assigned offset.
+  function port(n, key, toward) {
     const { hw, hh } = Nodes.half(n);
     const shape = n.shape || "circle";
-    const side = sideOf(n, toward), multi = sideCount[idx][side] > 1;
+    const side = sideOf(n, toward), off = offAt.get(key) || 0;
     if (side === "t" || side === "b") {
-      const lean = multi ? clamp(toward.x - n.x, -hw*0.6, hw*0.6) : 0;
-      const px = wx(gx(n.x + lean));
+      const px = wx(gx(n.x + off));
       const by = borderPerp(shape, px - n.x, hw, hh);   // border height at this x
       const y = n.y + (side === "b" ? by : -by);
       return { x: px, y, col: gx(px), row: gy(y), step: side === "b" ? [0,1] : [0,-1], vert: true };
     }
-    const lean = multi ? clamp(toward.y - n.y, -hh*0.6, hh*0.6) : 0;
-    const py = wy(gy(n.y + lean));
+    const py = wy(gy(n.y + off));
     const bx = borderPerp(shape, py - n.y, hh, hw);      // border width at this y
     const x = n.x + (side === "r" ? bx : -bx);
     return { x, y: py, col: gx(x), row: gy(py), step: side === "r" ? [1,0] : [-1,0], vert: false };
@@ -1180,9 +1206,9 @@ function orthogonalGeometry(graph, bounds) {
     return pa.vert ? [a, {x:a.x,y:b.y}, b] : [a, {x:b.x,y:a.y}, b];
   }
 
-  return edges.map(e => {
+  return edges.map((e, ei) => {
     const a = nodes[e.source], b = nodes[e.target];
-    const pa = port(a, e.source, b), pb = port(b, e.target, a);
+    const pa = port(a, ei*2, b), pb = port(b, ei*2+1, a);
     const oa = outer(pa), ob = outer(pb);
     let poly;
     const path = oa && ob ? astar(oa.c, oa.r, ob.c, ob.r) : null;

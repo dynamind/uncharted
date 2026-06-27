@@ -42,8 +42,10 @@ attack it.
   aligned **ports** (route between points *outside* the boxes — never let the jog
   happen inside a box, or the endpoint clip turns it into a diagonal). Ports prefer
   **top/bottom** for cross-layer edges (flowchart flow) and **lean** toward the other
-  endpoint (clamped in the side) **only when that side carries >1 edge** (single-edge
-  sides stay centred, so pass-throughs connect cleanly instead of skewering the box).
+  endpoint, then **de-collided per node-side** (`offAt` map): edges sharing a side are
+  spread to distinct slots (min SEP), single-edge sides stay centred, trunk children
+  sit at offset 0. Without this, dragging a node so two of its edges share a side made
+  them snap to the same point — one line skewering the box ("not connected").
   The attach point's perpendicular coord is the **shape border** (`borderPerp`): rect =
   flat, **diamond = angled face** (tapers to the vertex), circle = round — so a leaning
   port on a decision diamond meets its slanted edge, not the bounding box. Constructive
