@@ -106,6 +106,12 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   flat, **diamond = angled face** (tapers to the vertex), circle = round — so a leaning
   port on a decision diamond meets its slanted edge, not the bounding box. Constructive
   solvers **snap exactly onto on-grid targets when settled**, so edges line up to the px.
+  - **Ports track the node EXACTLY, not the lattice** (`makePort` uses `n.x+off`, not
+    `wx(gx(...))`). Snapping the attach point to the 15px routing grid made the port jump
+    a whole cell every ~15px of drag. A* still seeds from the snapped `col/row` (routing is
+    unchanged), but `routePorts` then slides the initial/final stub RUN onto the port's exact
+    axis (`alignStub`) so the stub stays straight and an aligned route still collapses to a
+    clean line. Pinned: dragging a box 1px moves its port ~1px (test/router.test.js).
 - **CROSSINGS ARE COMPUTED ON THE ACTUAL RENDERED POLYLINES** (`Renderer.crossings`,
   bbox prefilter + segment test) — the metric AND the hops read from the same points,
   so a hop only ever appears where the drawn lines truly cross. (This replaced the old

@@ -488,6 +488,21 @@ describe("orthogonal routing invariants", () => {
     expect(onBorder(A, start)).toBe(true);
   });
 
+  // Ports must track the node continuously as it's dragged — not snap to the routing
+  // lattice (which made the attach point jump a whole cell every ~15px of drag).
+  it("ports track the node smoothly under pixel drags (no cell-sized jumps)", () => {
+    let maxStep = 0, prev = null;
+    for (let ax = 360; ax <= 440; ax++) {            // drag A horizontally, 1px at a time
+      const nodes = [{ ...rect(ax, 200), id: 0 }, { ...rect(400, 440), id: 1 }];
+      const g = orthogonalGeometry({ nodes, edges: [{ source: 0, target: 1 }] },
+        { x0: 120, y0: 120, x1: 700, y1: 600 })[0];
+      const portX = g.poly[0].x;                     // where the edge leaves A
+      if (prev !== null) maxStep = Math.max(maxStep, Math.abs(portX - prev));
+      prev = portX;
+    }
+    expect(maxStep).toBeLessThan(2);                 // ~1px/step, not a ~15px cell jump
+  });
+
   it("a pass-through node's two edges attach at distinct points (no skewer)", () => {
     const A = rect(420, 600), R = rect(180, 200), C = rect(420, 900);
     const nodes = [{ ...A, id: 0 }, { ...R, id: 1 }, { ...C, id: 2 }];

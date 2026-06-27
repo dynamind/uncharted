@@ -204,18 +204,21 @@ export function orthogonalGeometry(graph, bounds, prev) {
     if (shape === "circle")  return Math.sqrt(Math.max(0, perp*perp - off*off));
     return perp;
   }
-  // a port on an explicit side, offset along that side
+  // a port on an explicit side, offset along that side. The attach point is the
+  // node's EXACT coordinate (n.x+off), NOT snapped to the lattice — otherwise the
+  // port jumps a whole cell at a time as the box is dragged pixel-by-pixel. The
+  // grid col/row (used only to seed A*) is still the snapped cell.
   function makePort(n, side, off) {
     const { hw, hh } = Nodes.half(n);
     const shape = n.shape || "circle";
     if (side === "t" || side === "b") {
-      const px = wx(gx(n.x + off));
-      const by = borderPerp(shape, px - n.x, hw, hh);
+      const px = n.x + off;
+      const by = borderPerp(shape, off, hw, hh);
       const y = n.y + (side === "b" ? by : -by);
       return { x: px, y, col: gx(px), row: gy(y), step: side === "b" ? [0,1] : [0,-1], vert: true };
     }
-    const py = wy(gy(n.y + off));
-    const bx = borderPerp(shape, py - n.y, hh, hw);
+    const py = n.y + off;
+    const bx = borderPerp(shape, off, hh, hw);
     const x = n.x + (side === "r" ? bx : -bx);
     return { x, y: py, col: gx(x), row: gy(py), step: side === "r" ? [1,0] : [-1,0], vert: false };
   }
@@ -245,6 +248,21 @@ export function orthogonalGeometry(graph, bounds, prev) {
   const polyLen = poly => { let s = 0;
     for (let i = 1; i < poly.length; i++) s += Math.abs(poly[i].x-poly[i-1].x) + Math.abs(poly[i].y-poly[i-1].y);
     return s; };
+  // Slide the initial (fromStart) / final stub RUN onto the port's exact axis. A*
+  // routes on the fixed lattice, but the ports sit at the node's exact off-lattice
+  // position; without this the stub from the exact port to the first lattice cell
+  // would be a diagonal. We move the whole run (consecutive cells sharing the stub
+  // axis) to the port coordinate, so the stub stays straight and the following
+  // segment just starts at the port's coordinate — everything stays axis-aligned.
+  function alignStub(poly, port, fromStart) {
+    const n = poly.length;
+    const axis = port.vert ? "x" : "y", v = port.vert ? port.x : port.y;
+    if (fromStart) { const a0 = poly[1][axis];
+      for (let i = 1; i < n-1 && Math.abs(poly[i][axis] - a0) < 0.5; i++) poly[i][axis] = v;
+    } else { const a0 = poly[n-2][axis];
+      for (let i = n-2; i > 0 && Math.abs(poly[i][axis] - a0) < 0.5; i--) poly[i][axis] = v;
+    }
+  }
   // route between two explicit ports; null if A* can't reach. Seed A* with the
   // source stub direction so the first segment isn't wasted on a needless corner.
   function routePorts(pa, pb) {
@@ -254,6 +272,8 @@ export function orthogonalGeometry(graph, bounds, prev) {
     const poly = [{ x: pa.x, y: pa.y }];
     for (const p of path) poly.push({ x: wx(p.x), y: wy(p.y) });
     poly.push({ x: pb.x, y: pb.y });
+    alignStub(poly, pa, true);
+    alignStub(poly, pb, false);
     return simplify(poly);
   }
 
