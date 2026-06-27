@@ -143,6 +143,13 @@ approximates it physically; constructive solvers (layered/circular) target struc
   (`force`, `annealing`, `hillclimb`, `layered`, `circular`); **flowchart preset**;
   tunable cost-weight + cooling sliders; per-solver explainer; node dragging; keyboard
   (space/S/R); 8 presets. Verified in-browser (Claude Preview), no console errors.
+- **Orthogonal routing is mature** (this is where most recent effort went): bend-minimised
+  side choice on BOTH ends, 1-bend L / bottom-to-side, U-turns for tight wedges, fan-order
+  ports (no sibling crossings), A* seeded with the stub direction, grid-quantised length
+  (no flicker), and **hysteresis** (sticky + drag-steerable). All pinned by 17 Vitest tests
+  in `test/router.test.js` — the single best place to understand the routing contract.
+  Run `npm test`. After ANY router change, also `npm run build` and check it stays a single
+  file (`grep -c '<script src' dist/index.html` == 0).
 - The length term penalises |len − k| (deviation from ideal), NOT raw length —
   raw length made SA collapse the graph to a point. Do not regress this.
 
@@ -152,10 +159,29 @@ approximates it physically; constructive solvers (layered/circular) target struc
   may be **< 1**. `frame()` accumulates it (`state._accum`) and runs `floor` steps, so the
   low end animates genuinely slowly (down to 0.15 steps/frame).
 
-## TODO / ideas not yet done
+## NEXT TASK — channel separation (overlapping edges)
 
-- Real ELK backend behind the facade (would validate the seam).
-- Orthogonal routing: separate parallel edges into distinct **channels** (they can overlap
-  in a shared lane now); dummy nodes for long layered edges + Brandes–Köpf x-coords.
+The routing of any single edge is solid now (see the long "side choice" list above and
+the 17 tests). The remaining defect: **two different edges whose A\* paths run along the
+same grid lane draw on top of each other** (collinear overlap — segInt returns null for
+parallels, so it isn't even a "crossing"/hop; the lines just merge into one). Visible on
+dense graphs (K₆ orthogonal) and wherever several edges share a corridor between rows.
+
+Where: `src/router.js`, `orthogonalGeometry`. A* is independent per edge over a shared
+`occ` grid; nothing nudges co-running edges apart. Sketch of approaches (pick/learn):
+- Post-process: detect groups of edge segments sharing a lane (same row/col band) and
+  offset each by k·(a few px) perpendicular, fanning them into parallel tracks; re-stitch
+  the polylines. Cheapest, local, no A* change.
+- Or route edges sequentially, adding a soft cost to already-used cells (lane cost) so
+  later edges prefer empty lanes. Changes A* to be order-dependent (then add hysteresis).
+- Test it the same way we've tested everything: build a small graph with forced shared
+  lanes, assert no two edge segments are collinear-coincident (write a `coincident()`
+  helper mirroring the `segInt` one in the tests).
+Keep edges ≤2 bends where possible and don't regress the 17 existing tests.
+
+## Other ideas (lower priority)
+
+- Real ELK backend behind the facade (would validate the seam end-to-end).
 - Arrowheads on directed edges (the flowchart reads as undirected lines today).
-- Best-cost-so-far tracking / a convergence sparkline; A/B race two solvers.
+- Layered: dummy nodes for long edges + Brandes–Köpf x-coords (proper Sugiyama).
+- Best-cost-so-far tracking / convergence sparkline; A/B race two solvers.
