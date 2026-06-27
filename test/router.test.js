@@ -101,6 +101,35 @@ describe("stacked boxes keep flowing downward (flowchart aesthetic)", () => {
   });
 });
 
+// Issue 2: dragging a child horizontally under a shared parent must never make
+// the two sibling edges cross — ports on a shared side are ordered by fan angle.
+describe("sibling edges from one node never cross (fan ordering)", () => {
+  const segInt = (a1, a2, b1, b2) => {
+    const d = (a2.x-a1.x)*(b2.y-b1.y) - (a2.y-a1.y)*(b2.x-b1.x);
+    if (Math.abs(d) < 1e-9) return false;
+    const t = ((b1.x-a1.x)*(b2.y-b1.y) - (b1.y-a1.y)*(b2.x-b1.x)) / d;
+    const u = ((b1.x-a1.x)*(a2.y-a1.y) - (b1.y-a1.y)*(a2.x-a1.x)) / d;
+    return t > 0.001 && t < 0.999 && u > 0.001 && u < 0.999;
+  };
+  const polyCross = (p, q) => {
+    for (let i = 1; i < p.length; i++) for (let j = 1; j < q.length; j++)
+      if (segInt(p[i-1], p[i], q[j-1], q[j])) return true;
+    return false;
+  };
+  it("sweep one child across the parent — siblings stay disjoint", () => {
+    const rect = (x, y, w = 98, h = 40) => ({ x, y, w, h, shape: "rect" });
+    const offenders = [];
+    for (let bx = 120; bx <= 620; bx += 2) {
+      const A = rect(360, 120), B = rect(bx, 360), C = rect(560, 360);
+      const g = orthogonalGeometry(
+        { nodes: [{...A,id:0},{...B,id:1},{...C,id:2}], edges: [{source:0,target:1},{source:0,target:2}] },
+        { x0: 0, y0: 0, x1: 1000, y1: 800 });
+      if (polyCross(g[0].poly, g[1].poly)) offenders.push(bx);
+    }
+    expect(offenders).toEqual([]);
+  });
+});
+
 describe("orthogonal routing invariants", () => {
   it("every edge connects on both node borders, axis-aligned", () => {
     const a = rect(180, 280), b = rect(540, 470);

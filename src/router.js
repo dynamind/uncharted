@@ -66,6 +66,17 @@ export const Nodes = {
 export const ORTHO = { cell: 15, margin: 11, turn: 8 };
 const SAMPLES = 18;        // bezier samples per curved edge
 
+// Fan order for several edges leaving the SAME side of a node: the angle to each
+// target, measured around the side's outward normal so it increases along the
+// side's tangent. Ordering ports by this key keeps the fanned edges from crossing
+// each other (the nearer target turns first, on the outer port).
+function fanKey(side, dx, dy) {
+  if (side === "r") return Math.atan2(dy, dx);
+  if (side === "l") return Math.atan2(dy, -dx);
+  if (side === "b") return Math.atan2(dx, dy);
+  return Math.atan2(dx, -dy);                       // "t"
+}
+
 /* ---- min-heap for A* ----------------------------------------------------- */
 class MinHeap {
   constructor() { this.a = []; }
@@ -252,8 +263,9 @@ export function orthogonalGeometry(graph, bounds) {
       const along = (side === "t" || side === "b") ? hw : hh;
       const axis  = (side === "t" || side === "b") ? other.x - n.x : other.y - n.y;
       const lim = along * (nodes[ni].shape === "diamond" ? 0.5 : 0.7);
+      const fan = fanKey(side, other.x - n.x, other.y - n.y);
       const gk = ni + ":" + side;
-      (groups.get(gk) || groups.set(gk, []).get(gk)).push({ key, want: clamp(axis, -lim, lim), along });
+      (groups.get(gk) || groups.set(gk, []).get(gk)).push({ key, want: clamp(axis, -lim, lim), along, fan });
     };
     edges.forEach((e, ei) => {
       add(e.source, sides[ei][0], ei*2,   nodes[e.source], nodes[e.target]);
@@ -261,7 +273,7 @@ export function orthogonalGeometry(graph, bounds) {
     });
     for (const arr of groups.values()) {
       if (arr.length === 1) { offAt.set(arr[0].key, 0); continue; }
-      arr.sort((p, q) => p.want - q.want);
+      arr.sort((p, q) => p.fan - q.fan || p.want - q.want);   // fan order ⇒ no self-crossing
       const pos = arr.map(r => r.want);
       for (let i = 1; i < pos.length; i++) if (pos[i] < pos[i-1] + SEP) pos[i] = pos[i-1] + SEP;
       for (let i = pos.length-2; i >= 0; i--) if (pos[i] > pos[i+1] - SEP) pos[i] = pos[i+1] - SEP;

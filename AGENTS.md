@@ -68,6 +68,9 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
     in 2 bends instead of wrapping in 4.
   - A* is seeded with the **source stub direction** (`dirOf(pa.step)`); without it A*
     turns freely at the first cell and wastes the stub, adding a phantom bend.
+  - Several edges leaving the SAME side are ordered by **fan angle to their targets**
+    (`fanKey`), not just by their lean — so siblings don't cross each other as one is
+    dragged across (the nearer target turns first, on the outer port).
   Each result carries its chosen `sides` for testing. Invariant (test/router.test.js):
   sweeping a side-by-side box through a vertical range, the route **never exceeds 2
   bends** (a ≤2-bend route always exists when one axis has clearance; near-overlap on
