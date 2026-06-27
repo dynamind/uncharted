@@ -1,0 +1,784 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Uncharted · graph-layout solver lab</title>
+<style>
+  :root {
+    --bg:        #0b0e14;
+    --bg-dot:    rgba(120,140,180,0.10);
+    --panel:     #11151f;
+    --panel-2:   #161b27;
+    --line:      #232a39;
+    --ink:       #e6ebf5;
+    --ink-dim:   #8b96ad;
+    --ink-faint: #5b6680;
+    --accent:    #5ad1c2;
+    --accent-2:  #7c8cff;
+    --warn:      #ffb454;
+    --bad:       #ff6b81;
+    --edge:      #4a5878;
+    --edge-hi:   #8fa1c9;
+    --node:      #7c8cff;
+    --node-ring: #b8c4ff;
+    --radius:    10px;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+
+  body {
+    background-color: var(--bg);
+    /* subtle dot-grid */
+    background-image: radial-gradient(var(--bg-dot) 1px, transparent 1.4px);
+    background-size: 24px 24px;
+    background-position: -12px -12px;
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    overflow: hidden;
+  }
+
+  #app {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    height: 100vh;
+  }
+
+  /* ---------- stage ---------- */
+  #stage { position: relative; overflow: hidden; }
+  #canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+  #title {
+    position: absolute; left: 20px; top: 16px; z-index: 3;
+    pointer-events: none; user-select: none;
+  }
+  #title h1 {
+    margin: 0; font-size: 15px; letter-spacing: 0.14em; font-weight: 600;
+    text-transform: uppercase; color: var(--ink);
+  }
+  #title h1 .dot { color: var(--accent); }
+  #title p { margin: 4px 0 0; font-size: 12px; color: var(--ink-faint); letter-spacing: 0.02em; }
+
+  #hud {
+    position: absolute; left: 20px; bottom: 16px; z-index: 3;
+    display: flex; gap: 8px; flex-wrap: wrap; pointer-events: none;
+  }
+  .chip {
+    background: rgba(17,21,31,0.72); border: 1px solid var(--line);
+    border-radius: 999px; padding: 5px 11px; font-family: var(--mono);
+    font-size: 11.5px; color: var(--ink-dim); backdrop-filter: blur(6px);
+  }
+  .chip b { color: var(--ink); font-weight: 600; }
+  .chip.cross b { color: var(--warn); }
+  .chip.cost  b { color: var(--accent); }
+
+  /* ---------- sidebar ---------- */
+  #side {
+    background: var(--panel);
+    border-left: 1px solid var(--line);
+    overflow-y: auto;
+    padding: 18px 16px 40px;
+  }
+  #side::-webkit-scrollbar { width: 9px; }
+  #side::-webkit-scrollbar-thumb { background: var(--line); border-radius: 9px; }
+
+  .group { margin-bottom: 22px; }
+  .group > .label {
+    font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-faint); margin-bottom: 10px; font-weight: 600;
+  }
+
+  .seg { display: grid; gap: 6px; }
+  .seg.cols2 { grid-template-columns: 1fr 1fr; }
+
+  button, select {
+    font-family: var(--sans); font-size: 13px; color: var(--ink);
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 9px 11px; cursor: pointer;
+    transition: border-color .12s, background .12s, color .12s;
+    width: 100%;
+  }
+  button:hover, select:hover { border-color: var(--ink-faint); }
+  button:active { transform: translateY(1px); }
+  button.primary { background: var(--accent); color: #062420; border-color: transparent; font-weight: 600; }
+  button.primary:hover { filter: brightness(1.06); }
+  button.ghost.active { border-color: var(--accent); color: var(--accent); }
+  select { appearance: none; background-image:
+      linear-gradient(45deg, transparent 50%, var(--ink-faint) 50%),
+      linear-gradient(135deg, var(--ink-faint) 50%, transparent 50%);
+    background-position: calc(100% - 16px) 17px, calc(100% - 11px) 17px;
+    background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+
+  .row { display: flex; align-items: center; gap: 10px; margin: 12px 0; }
+  .row label { flex: 0 0 92px; font-size: 12px; color: var(--ink-dim); }
+  .row .val { flex: 0 0 42px; text-align: right; font-family: var(--mono); font-size: 12px; color: var(--ink); }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none; flex: 1; height: 3px;
+    background: var(--line); border-radius: 3px; outline: none;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: var(--accent); cursor: pointer; border: 2px solid var(--bg);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 14px; height: 14px; border-radius: 50%; background: var(--accent);
+    cursor: pointer; border: 2px solid var(--bg);
+  }
+
+  .toggle { display: flex; align-items: center; gap: 9px; cursor: pointer; margin: 9px 0; }
+  .toggle input { display: none; }
+  .toggle .box {
+    width: 34px; height: 19px; border-radius: 999px; background: var(--line);
+    position: relative; transition: background .15s; flex: 0 0 auto;
+  }
+  .toggle .box::after {
+    content: ""; position: absolute; top: 2px; left: 2px; width: 15px; height: 15px;
+    border-radius: 50%; background: var(--ink-dim); transition: left .15s, background .15s;
+  }
+  .toggle input:checked + .box { background: var(--accent); }
+  .toggle input:checked + .box::after { left: 17px; background: #062420; }
+  .toggle span.t { font-size: 12.5px; color: var(--ink-dim); }
+
+  .note { font-size: 11.5px; line-height: 1.55; color: var(--ink-faint); }
+  .note b { color: var(--ink-dim); font-weight: 600; }
+
+  .metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .metric {
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 9px 11px;
+  }
+  .metric .k { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); }
+  .metric .v { font-family: var(--mono); font-size: 18px; color: var(--ink); margin-top: 3px; }
+  .metric .v.warn { color: var(--warn); }
+  .metric .v.good { color: var(--accent); }
+
+  .params { transition: opacity .15s; }
+  .params.disabled { opacity: 0.32; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="stage">
+    <canvas id="canvas"></canvas>
+    <div id="title">
+      <h1>Uncharted<span class="dot">.</span></h1>
+      <p>graph layout as combinatorial optimization</p>
+    </div>
+    <div id="hud">
+      <div class="chip">solver <b id="hud-solver">force</b></div>
+      <div class="chip">iter <b id="hud-iter">0</b></div>
+      <div class="chip cross">crossings <b id="hud-cross">–</b></div>
+      <div class="chip cost">cost <b id="hud-cost">–</b></div>
+    </div>
+  </div>
+
+  <aside id="side">
+    <div class="group">
+      <div class="label">Layout engine</div>
+      <div class="seg">
+        <select id="sel-solver" title="Solver backend">
+          <option value="force">Force-directed · Fruchterman–Reingold</option>
+        </select>
+        <select id="sel-graph" title="Graph">
+        </select>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="label">Run</div>
+      <div class="seg cols2">
+        <button id="btn-play" class="primary">▶ Play</button>
+        <button id="btn-step">Step</button>
+        <button id="btn-reset">Reshuffle</button>
+        <button id="btn-restart">Re-solve</button>
+      </div>
+      <div class="row">
+        <label>Speed</label>
+        <input id="rng-speed" type="range" min="1" max="40" value="6" />
+        <div class="val" id="val-speed">6</div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="label">Metrics</div>
+      <div class="metrics">
+        <div class="metric"><div class="k">Nodes</div><div class="v" id="m-nodes">0</div></div>
+        <div class="metric"><div class="k">Edges</div><div class="v" id="m-edges">0</div></div>
+        <div class="metric"><div class="k">Crossings</div><div class="v warn" id="m-cross">0</div></div>
+        <div class="metric"><div class="k">Cost</div><div class="v good" id="m-cost">0</div></div>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="label">Display</div>
+      <label class="toggle"><input type="checkbox" id="tg-curve" checked /><span class="box"></span><span class="t">Curved edges</span></label>
+      <label class="toggle"><input type="checkbox" id="tg-hops" checked /><span class="box"></span><span class="t">Crossing hops</span></label>
+      <label class="toggle"><input type="checkbox" id="tg-labels" /><span class="box"></span><span class="t">Node labels</span></label>
+    </div>
+
+    <div class="group">
+      <div class="label">About</div>
+      <p class="note">
+        Production stacks (Dagre, ELK) hide layout behind a <b>facade</b>. Uncharted keeps
+        that seam but exposes each solver iteratively so you can <b>watch</b> it work.
+        Drag any node to perturb the system. Crossings are drawn as little <b>hops</b>.
+      </p>
+    </div>
+  </aside>
+</div>
+
+<script>
+"use strict";
+/* ============================================================================
+   Uncharted — a graph-layout solver lab.
+   One file, no dependencies. Sections:
+     1. Geometry helpers
+     2. Graph model + presets
+     3. LayoutEngine facade + solvers
+     4. Renderer (dark, curved edges, crossing hops)
+     5. App controller (loop, UI, interaction)
+   ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+   1. Geometry
+   ------------------------------------------------------------------------- */
+const Geo = {
+  // Do segments p1->p2 and p3->p4 properly cross? Returns intersection point or null.
+  segInt(x1,y1,x2,y2, x3,y3,x4,y4) {
+    const d = (x2-x1)*(y4-y3) - (y2-y1)*(x4-x3);
+    if (Math.abs(d) < 1e-9) return null;            // parallel
+    const t = ((x3-x1)*(y4-y3) - (y3-y1)*(x4-x3)) / d;
+    const u = ((x3-x1)*(y2-y1) - (y3-y1)*(x2-x1)) / d;
+    if (t <= 0.001 || t >= 0.999 || u <= 0.001 || u >= 0.999) return null;
+    return { x: x1 + t*(x2-x1), y: y1 + t*(y2-y1), t };
+  },
+  // Sample a quadratic bezier (p0, control c, p1) into n+1 points.
+  sampleQuad(p0, c, p1, n) {
+    const pts = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n, mt = 1 - t;
+      pts.push({
+        x: mt*mt*p0.x + 2*mt*t*c.x + t*t*p1.x,
+        y: mt*mt*p0.y + 2*mt*t*c.y + t*t*p1.y,
+      });
+    }
+    return pts;
+  },
+  dist(ax, ay, bx, by) { return Math.hypot(ax-bx, ay-by); },
+  clamp(v, lo, hi) { return v < lo ? lo : v > hi ? hi : v; },
+};
+
+/* ---------------------------------------------------------------------------
+   2. Graph model + presets
+   Graph = { nodes:[{id,x,y,vx,vy,fixed}], edges:[{source,target}] }  (indices)
+   ------------------------------------------------------------------------- */
+const Presets = {
+  tree(levels = 4, branch = 2) {
+    const nodes = [{ id: 0 }], edges = [];
+    let frontier = [0];
+    for (let l = 1; l < levels; l++) {
+      const next = [];
+      for (const p of frontier) {
+        for (let b = 0; b < branch; b++) {
+          const id = nodes.length; nodes.push({ id });
+          edges.push({ source: p, target: id }); next.push(id);
+        }
+      }
+      frontier = next;
+    }
+    return { nodes, edges };
+  },
+  grid(w = 6, h = 5) {
+    const nodes = [], edges = [];
+    const idx = (x, y) => y*w + x;
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) nodes.push({ id: idx(x,y) });
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (x < w-1) edges.push({ source: idx(x,y), target: idx(x+1,y) });
+      if (y < h-1) edges.push({ source: idx(x,y), target: idx(x,y+1) });
+    }
+    return { nodes, edges };
+  },
+  random(n = 22, p = 0.12) {
+    const nodes = Array.from({ length: n }, (_, id) => ({ id })), edges = [];
+    for (let i = 0; i < n; i++) for (let j = i+1; j < n; j++)
+      if (Math.random() < p) edges.push({ source: i, target: j });
+    // guarantee connectivity: chain leftovers
+    const seen = new Set(edges.flatMap(e => [e.source, e.target]));
+    for (let i = 0; i < n; i++) if (!seen.has(i))
+      edges.push({ source: i, target: (i+1) % n });
+    return { nodes, edges };
+  },
+  cube() { // Q3 hypercube graph (3-cube)
+    const nodes = Array.from({ length: 8 }, (_, id) => ({ id })), edges = [];
+    for (let i = 0; i < 8; i++) for (let b = 0; b < 3; b++) {
+      const j = i ^ (1 << b);
+      if (i < j) edges.push({ source: i, target: j });
+    }
+    return { nodes, edges };
+  },
+  bipartite(a = 3, b = 3) { // complete bipartite K(a,b) — K(3,3) is non-planar
+    const nodes = Array.from({ length: a+b }, (_, id) => ({ id })), edges = [];
+    for (let i = 0; i < a; i++) for (let j = 0; j < b; j++)
+      edges.push({ source: i, target: a + j });
+    return { nodes, edges };
+  },
+  complete(n = 6) { // K_n — K5 is non-planar
+    const nodes = Array.from({ length: n }, (_, id) => ({ id })), edges = [];
+    for (let i = 0; i < n; i++) for (let j = i+1; j < n; j++)
+      edges.push({ source: i, target: j });
+    return { nodes, edges };
+  },
+  clusters(k = 3, per = 6) { // k loosely-connected dense clusters
+    const nodes = [], edges = [];
+    const heads = [];
+    for (let c = 0; c < k; c++) {
+      const base = nodes.length, head = base;
+      for (let i = 0; i < per; i++) nodes.push({ id: nodes.length });
+      for (let i = 0; i < per; i++) for (let j = i+1; j < per; j++)
+        if (Math.random() < 0.55) edges.push({ source: base+i, target: base+j });
+      heads.push(head);
+    }
+    for (let c = 1; c < k; c++) edges.push({ source: heads[c-1], target: heads[c] });
+    return { nodes, edges };
+  },
+};
+
+const PRESET_LIST = [
+  ["tree",      "Binary tree",        () => Presets.tree(5, 2)],
+  ["grid",      "Grid lattice 6×5",   () => Presets.grid(6, 5)],
+  ["cube",      "Cube graph Q₃",      () => Presets.cube()],
+  ["random",    "Random G(n,p)",      () => Presets.random(22, 0.12)],
+  ["clusters",  "Clusters",           () => Presets.clusters(3, 6)],
+  ["bipartite", "K₃,₃ (non-planar)",  () => Presets.bipartite(3, 3)],
+  ["complete",  "K₆ (dense)",         () => Presets.complete(6)],
+];
+
+// Scatter nodes into the play area as a starting state.
+function seedPositions(graph, bounds) {
+  const { x0, y0, x1, y1 } = bounds;
+  const cx = (x0+x1)/2, cy = (y0+y1)/2;
+  const r = Math.min(x1-x0, y1-y0) * 0.4;
+  graph.nodes.forEach((n, i) => {
+    const a = (i / graph.nodes.length) * Math.PI * 2 + Math.random()*0.6;
+    const rr = r * (0.35 + Math.random()*0.65);
+    n.x = cx + Math.cos(a)*rr;
+    n.y = cy + Math.sin(a)*rr;
+    n.vx = 0; n.vy = 0; n.fixed = false;
+  });
+  return graph;
+}
+
+/* ---------------------------------------------------------------------------
+   3. LayoutEngine facade + solvers
+   A solver instance exposes: step() -> advance one iteration (mutates nodes),
+   and a `done` flag. This iterative seam is what makes solving *visible*; a
+   batch backend like ELK would simply resolve its result behind the same API.
+   ------------------------------------------------------------------------- */
+const LayoutEngine = {
+  solvers: {},
+  register(name, factory) { this.solvers[name] = factory; },
+  create(name, graph, bounds, params) {
+    const factory = this.solvers[name];
+    if (!factory) throw new Error("unknown solver: " + name);
+    return factory(graph, bounds, params);
+  },
+};
+
+/* --- Force-directed: Fruchterman–Reingold with cooling + center gravity --- */
+LayoutEngine.register("force", (graph, bounds, params) => {
+  const { nodes, edges } = graph;
+  const W = bounds.x1 - bounds.x0, H = bounds.y1 - bounds.y0;
+  const area = W * H;
+  let temp = Math.min(W, H) * 0.18;       // initial max displacement
+  let iter = 0;
+
+  const ideal = () => Math.sqrt(area / Math.max(1, nodes.length)) * (params.spacing ?? 0.62);
+
+  return {
+    name: "force",
+    get done() { return temp < 0.35; },
+    get iter() { return iter; },
+    step() {
+      iter++;
+      const k = ideal();
+      const grav = params.gravity ?? 0.03;
+      const cx = (bounds.x0 + bounds.x1) / 2, cy = (bounds.y0 + bounds.y1) / 2;
+
+      for (const n of nodes) { n._dx = 0; n._dy = 0; }
+
+      // repulsion (all pairs)
+      for (let i = 0; i < nodes.length; i++) {
+        const a = nodes[i];
+        for (let j = i+1; j < nodes.length; j++) {
+          const b = nodes[j];
+          let dx = a.x - b.x, dy = a.y - b.y;
+          let d = Math.hypot(dx, dy) || 0.01;
+          if (d > k * 6) continue;            // cheap cutoff for far pairs
+          const f = (k*k) / d;
+          dx /= d; dy /= d;
+          a._dx += dx*f; a._dy += dy*f;
+          b._dx -= dx*f; b._dy -= dy*f;
+        }
+      }
+      // attraction (edges as springs)
+      for (const e of edges) {
+        const a = nodes[e.source], b = nodes[e.target];
+        let dx = a.x - b.x, dy = a.y - b.y;
+        let d = Math.hypot(dx, dy) || 0.01;
+        const f = (d*d) / k;
+        dx /= d; dy /= d;
+        a._dx -= dx*f; a._dy -= dy*f;
+        b._dx += dx*f; b._dy += dy*f;
+      }
+      // gravity toward centre keeps the drawing on screen
+      for (const n of nodes) {
+        n._dx += (cx - n.x) * grav;
+        n._dy += (cy - n.y) * grav;
+      }
+      // integrate with temperature cap
+      for (const n of nodes) {
+        if (n.fixed) continue;
+        const d = Math.hypot(n._dx, n._dy) || 0.01;
+        const s = Math.min(d, temp) / d;
+        n.x += n._dx * s;
+        n.y += n._dy * s;
+        n.x = Geo.clamp(n.x, bounds.x0, bounds.x1);
+        n.y = Geo.clamp(n.y, bounds.y0, bounds.y1);
+      }
+      temp *= 0.985;                          // cool
+    },
+  };
+});
+
+/* ---------------------------------------------------------------------------
+   4. Renderer
+   ------------------------------------------------------------------------- */
+const Renderer = (() => {
+  const NODE_R = 8;
+  const SAMPLES = 18;        // bezier samples per edge (curve + crossing detect)
+  const HOP_R = 5.5;
+
+  // Build per-edge geometry (a polyline) for the current node positions.
+  function edgeGeometry(graph, curved) {
+    const { nodes, edges } = graph;
+    return edges.map((e, i) => {
+      const a = nodes[e.source], b = nodes[e.target];
+      const p0 = { x: a.x, y: a.y }, p1 = { x: b.x, y: b.y };
+      if (!curved) return { poly: [p0, p1], a, b };
+      const mx = (p0.x+p1.x)/2, my = (p0.y+p1.y)/2;
+      const dx = p1.x-p0.x, dy = p1.y-p0.y;
+      const len = Math.hypot(dx, dy) || 1;
+      const off = Math.min(46, len*0.13) * ((i % 2) ? 1 : -1);
+      const c = { x: mx - dy/len*off, y: my + dx/len*off };
+      return { poly: Geo.sampleQuad(p0, c, p1, SAMPLES), a, b, c };
+    });
+  }
+
+  function draw(ctx, view, graph, geom, crossings, opts) {
+    ctx.clearRect(0, 0, view.w, view.h);
+
+    // crossing points grouped by the edge that should hop *over*
+    const hopsByEdge = new Map();
+    if (opts.hops) {
+      for (const c of crossings) {
+        const over = c.eA > c.eB ? c.eA : c.eB; // deterministic: higher index hops
+        if (!hopsByEdge.has(over)) hopsByEdge.set(over, []);
+        hopsByEdge.get(over).push(c);
+      }
+    }
+
+    // edges
+    ctx.lineWidth = 1.6;
+    ctx.lineCap = "round";
+    for (let i = 0; i < geom.length; i++) {
+      ctx.strokeStyle = getCss("--edge");
+      const hops = hopsByEdge.get(i);
+      if (hops && hops.length) drawPolyWithHops(ctx, geom[i].poly, hops);
+      else drawPoly(ctx, geom[i].poly);
+    }
+
+    // crossing markers (faint)
+    if (opts.hops) {
+      ctx.fillStyle = "rgba(255,180,84,0.0)";
+    }
+
+    // nodes
+    for (const n of graph.nodes) {
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, NODE_R, 0, Math.PI*2);
+      ctx.fillStyle = getCss("--node");
+      ctx.fill();
+      ctx.lineWidth = 2;
+      ctx.strokeStyle = n.fixed ? getCss("--accent") : getCss("--node-ring");
+      ctx.stroke();
+      if (opts.labels) {
+        ctx.fillStyle = getCss("--ink");
+        ctx.font = "10px " + getCss("--mono");
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillText(String(n.id), n.x, n.y - NODE_R - 8);
+      }
+    }
+  }
+
+  function drawPoly(ctx, poly) {
+    ctx.beginPath();
+    ctx.moveTo(poly[0].x, poly[0].y);
+    for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
+    ctx.stroke();
+  }
+
+  // Walk the polyline; near each hop point, lift into a small arc (a bridge).
+  function drawPolyWithHops(ctx, poly, hops) {
+    ctx.beginPath();
+    ctx.moveTo(poly[0].x, poly[0].y);
+    for (let i = 1; i < poly.length; i++) {
+      const p = poly[i], q = poly[i-1];
+      let hopped = false;
+      for (const h of hops) {
+        // is the hop point within this segment's neighbourhood?
+        const d = Geo.dist(h.x, h.y, p.x, p.y);
+        if (d < HOP_R*1.4) {
+          // draw up to entry of the bump, arc over, continue
+          const dirx = p.x - q.x, diry = p.y - q.y;
+          const L = Math.hypot(dirx, diry) || 1;
+          const ux = dirx/L, uy = diry/L;
+          const ex = h.x - ux*HOP_R, ey = h.y - uy*HOP_R;     // bump start
+          const fx = h.x + ux*HOP_R, fy = h.y + uy*HOP_R;     // bump end
+          ctx.lineTo(ex, ey);
+          const ang = Math.atan2(uy, ux);
+          ctx.arc(h.x, h.y, HOP_R, ang - Math.PI, ang, false);
+          ctx.moveTo(fx, fy);
+          hopped = true;
+          break;
+        }
+      }
+      if (!hopped) ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+  }
+
+  return { edgeGeometry, draw, NODE_R, SAMPLES };
+})();
+
+// read a CSS custom property (cached)
+const _css = {};
+function getCss(name) {
+  if (_css[name]) return _css[name];
+  return (_css[name] = getComputedStyle(document.documentElement).getPropertyValue(name).trim());
+}
+
+/* ---------------------------------------------------------------------------
+   5. App controller
+   ------------------------------------------------------------------------- */
+const App = (() => {
+  const canvas = document.getElementById("canvas");
+  const ctx = canvas.getContext("2d");
+  const stage = document.getElementById("stage");
+
+  const state = {
+    graph: null,
+    geom: [],
+    crossings: [],
+    solver: null,
+    solverName: "force",
+    presetName: "tree",
+    running: false,
+    speed: 6,
+    params: { spacing: 0.62, gravity: 0.03 },
+    opts: { curve: true, hops: true, labels: false },
+    view: { w: 0, h: 0, dpr: 1 },
+    bounds: { x0: 0, y0: 0, x1: 0, y1: 0 },
+  };
+
+  function bounds() {
+    const pad = 56;
+    return { x0: pad, y0: pad, x1: state.view.w - pad, y1: state.view.h - pad };
+  }
+
+  function resize() {
+    const r = stage.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    state.view = { w: r.width, h: r.height, dpr };
+    canvas.width = r.width * dpr;
+    canvas.height = r.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    state.bounds = bounds();
+  }
+
+  function loadGraph(presetName, reseed = true) {
+    state.presetName = presetName;
+    const def = PRESET_LIST.find(p => p[0] === presetName) || PRESET_LIST[0];
+    state.graph = def[2]();
+    state.bounds = bounds();
+    if (reseed) seedPositions(state.graph, state.bounds);
+    buildSolver();
+    updateMetricChips(true);
+  }
+
+  function buildSolver() {
+    state.solver = LayoutEngine.create(state.solverName, state.graph, state.bounds, state.params);
+    document.getElementById("hud-solver").textContent = state.solverName;
+  }
+
+  // crossing detection on the rendered polylines (shared by metric + hops)
+  function computeCrossings() {
+    const g = state.geom, out = [];
+    for (let i = 0; i < g.length; i++) {
+      const A = g[i];
+      for (let j = i+1; j < g.length; j++) {
+        const B = g[j];
+        if (shareEndpoint(A, B)) continue;          // adjacent edges don't "cross"
+        const hit = polyInt(A.poly, B.poly);
+        if (hit) out.push({ x: hit.x, y: hit.y, eA: i, eB: j });
+      }
+    }
+    return out;
+  }
+  function shareEndpoint(A, B) {
+    return A.a === B.a || A.a === B.b || A.b === B.a || A.b === B.b;
+  }
+  function polyInt(pa, pb) {
+    for (let i = 1; i < pa.length; i++) {
+      const a1 = pa[i-1], a2 = pa[i];
+      for (let j = 1; j < pb.length; j++) {
+        const b1 = pb[j-1], b2 = pb[j];
+        const hit = Geo.segInt(a1.x,a1.y,a2.x,a2.y, b1.x,b1.y,b2.x,b2.y);
+        if (hit) return hit;
+      }
+    }
+    return null;
+  }
+
+  function totalEdgeLength() {
+    let s = 0;
+    for (const e of state.graph.edges) {
+      const a = state.graph.nodes[e.source], b = state.graph.nodes[e.target];
+      s += Geo.dist(a.x, a.y, b.x, b.y);
+    }
+    return s;
+  }
+
+  function recompute() {
+    state.geom = Renderer.edgeGeometry(state.graph, state.opts.curve);
+    state.crossings = computeCrossings();
+  }
+
+  function cost() {
+    const len = totalEdgeLength();
+    // simple readable objective; SA will optimise a richer one later
+    return state.crossings.length * 100 + len * 0.05;
+  }
+
+  function updateMetricChips(full) {
+    document.getElementById("hud-iter").textContent = state.solver ? state.solver.iter : 0;
+    document.getElementById("hud-cross").textContent = state.crossings.length;
+    document.getElementById("hud-cost").textContent = Math.round(cost());
+    if (full) {
+      document.getElementById("m-nodes").textContent = state.graph.nodes.length;
+      document.getElementById("m-edges").textContent = state.graph.edges.length;
+    }
+    document.getElementById("m-cross").textContent = state.crossings.length;
+    document.getElementById("m-cost").textContent = Math.round(cost());
+  }
+
+  function frame() {
+    if (state.running && state.solver) {
+      for (let i = 0; i < state.speed; i++) {
+        if (state.solver.done) { setRunning(false); break; }
+        state.solver.step();
+      }
+    }
+    recompute();
+    Renderer.draw(ctx, state.view, state.graph, state.geom, state.crossings, {
+      hops: state.opts.hops, labels: state.opts.labels,
+    });
+    updateMetricChips(false);
+    requestAnimationFrame(frame);
+  }
+
+  function setRunning(on) {
+    state.running = on;
+    const b = document.getElementById("btn-play");
+    b.textContent = on ? "❚❚ Pause" : "▶ Play";
+    b.classList.toggle("primary", !on);
+  }
+
+  /* -------- interaction: drag nodes -------- */
+  let drag = null;
+  function nodeAt(x, y) {
+    for (const n of state.graph.nodes)
+      if (Geo.dist(x, y, n.x, n.y) <= Renderer.NODE_R + 5) return n;
+    return null;
+  }
+  function ptr(e) {
+    const r = canvas.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+  canvas.addEventListener("pointerdown", e => {
+    const p = ptr(e);
+    const n = nodeAt(p.x, p.y);
+    if (n) { drag = n; n.fixed = true; canvas.setPointerCapture(e.pointerId); }
+  });
+  canvas.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const p = ptr(e);
+    drag.x = Geo.clamp(p.x, state.bounds.x0, state.bounds.x1);
+    drag.y = Geo.clamp(p.y, state.bounds.y0, state.bounds.y1);
+  });
+  canvas.addEventListener("pointerup", () => { if (drag) { drag.fixed = false; drag = null; } });
+
+  /* -------- UI wiring -------- */
+  function wire() {
+    // populate selects
+    const gs = document.getElementById("sel-graph");
+    for (const [id, label] of PRESET_LIST) {
+      const o = document.createElement("option"); o.value = id; o.textContent = label; gs.appendChild(o);
+    }
+    gs.value = state.presetName;
+    gs.addEventListener("change", () => loadGraph(gs.value));
+
+    document.getElementById("sel-solver").addEventListener("change", e => {
+      state.solverName = e.target.value; buildSolver();
+    });
+
+    document.getElementById("btn-play").addEventListener("click", () => setRunning(!state.running));
+    document.getElementById("btn-step").addEventListener("click", () => {
+      if (state.solver && !state.solver.done) state.solver.step();
+    });
+    document.getElementById("btn-reset").addEventListener("click", () => loadGraph(state.presetName, true));
+    document.getElementById("btn-restart").addEventListener("click", () => {
+      seedPositions(state.graph, state.bounds); buildSolver(); setRunning(true);
+    });
+
+    const sp = document.getElementById("rng-speed");
+    sp.addEventListener("input", () => {
+      state.speed = +sp.value;
+      document.getElementById("val-speed").textContent = sp.value;
+    });
+
+    document.getElementById("tg-curve").addEventListener("change", e => state.opts.curve = e.target.checked);
+    document.getElementById("tg-hops").addEventListener("change", e => state.opts.hops = e.target.checked);
+    document.getElementById("tg-labels").addEventListener("change", e => state.opts.labels = e.target.checked);
+
+    window.addEventListener("resize", () => { resize(); });
+  }
+
+  function init() {
+    resize();
+    wire();
+    loadGraph("tree");
+    setRunning(true);
+    requestAnimationFrame(frame);
+  }
+
+  return { init };
+})();
+
+App.init();
+</script>
+</body>
+</html>
