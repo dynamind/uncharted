@@ -66,23 +66,15 @@ export const Nodes = {
 export const ORTHO = { cell: 15, margin: 11, turn: 8 };
 const SAMPLES = 18;        // bezier samples per curved edge
 
-/* ---- side selection (the tested decision) -------------------------------- */
-// Which sides [sideA, sideB] an edge a→b should attach to. Driven by the GAPS
-// between the box EDGES, widened by the routing margin (and a little grid slack):
-// a clean orthogonal channel only exists when the two keep-away margins clear,
-// otherwise A* has to squeeze around and bends pile up. So we use top/bottom only
-// when the boxes truly clear each other vertically (incl. margins); if they
-// overlap vertically but sit side-by-side, the near left/right sides are used.
-// Vertical clearance wins ties so genuinely stacked flowchart edges flow down.
-export function sidesForEdge(a, b) {
-  const ah = Nodes.half(a), bh = Nodes.half(b);
-  const vGap = Math.max((b.y - bh.hh) - (a.y + ah.hh), (a.y - ah.hh) - (b.y + bh.hh));
-  const hGap = Math.max((b.x - bh.hw) - (a.x + ah.hw), (a.x - ah.hw) - (b.x + bh.hw));
-  const need = 2 * ORTHO.margin + ORTHO.cell;       // channel must clear both margins (+1 cell)
-  const vOK = vGap >= need, hOK = hGap >= need;
-  const vertical = vOK || (!hOK && vGap >= hGap);
-  if (vertical) return a.y <= b.y ? ["b", "t"] : ["t", "b"];
-  return a.x <= b.x ? ["r", "l"] : ["l", "r"];
+// Candidate side pairs for an edge a→b: the vertical-facing pair and the
+// horizontal-facing pair. orthogonalGeometry picks between them by actually
+// routing and counting bends (an analytic gap threshold can't see when a thin
+// channel forces A* to wrap into extra bends — that was the 4-bend bug).
+function candidateSides(a, b) {
+  return [
+    a.y <= b.y ? ["b", "t"] : ["t", "b"],   // vertical (preferred on ties → flow down)
+    a.x <= b.x ? ["r", "l"] : ["l", "r"],   // horizontal
+  ];
 }
 
 /* ---- min-heap for A* ----------------------------------------------------- */
@@ -154,43 +146,6 @@ export function orthogonalGeometry(graph, bounds) {
     return path.reverse();
   }
 
-  // Pre-assign each edge an attach OFFSET along its side: lean toward the other
-  // endpoint, then de-collide edges sharing a side so co-directional ones spread
-  // into distinct slots (single-edge sides stay centred; trunk children at 0).
-  const SEP = C.cell + 6;
-  const offAt = new Map(), sideAt = new Map();      // edgeIndex*2 + endpoint → offset / side
-  {
-    const groups = new Map();
-    const add = (ni, side, key, n, other) => {
-      sideAt.set(key, side);
-      const { hw, hh } = Nodes.half(n);
-      const along = (side === "t" || side === "b") ? hw : hh;
-      const axis  = (side === "t" || side === "b") ? other.x - n.x : other.y - n.y;
-      const lim = along * (nodes[ni].shape === "diamond" ? 0.5 : 0.7);
-      const rec = { key, want: clamp(axis, -lim, lim), along };
-      const gk = ni + ":" + side;
-      (groups.get(gk) || groups.set(gk, []).get(gk)).push(rec);
-    };
-    edges.forEach((e, ei) => {
-      const a = nodes[e.source], b = nodes[e.target];
-      const [sa, sb] = sidesForEdge(a, b);
-      add(e.source, sa, ei*2,   a, b);
-      add(e.target, sb, ei*2+1, b, a);
-    });
-    for (const arr of groups.values()) {
-      if (arr.length === 1) { offAt.set(arr[0].key, 0); continue; }
-      arr.sort((p, q) => p.want - q.want);
-      const pos = arr.map(r => r.want);
-      for (let i = 1; i < pos.length; i++) if (pos[i] < pos[i-1] + SEP) pos[i] = pos[i-1] + SEP;
-      for (let i = pos.length-2; i >= 0; i--) if (pos[i] > pos[i+1] - SEP) pos[i] = pos[i+1] - SEP;
-      const lim = arr[0].along * 0.82, span = pos[pos.length-1] - pos[0];
-      if (span > 2*lim) for (let i = 0; i < pos.length; i++) pos[i] = -lim + 2*lim*i/(pos.length-1);
-      else { const sh = pos[0] < -lim ? -lim - pos[0] : pos[pos.length-1] > lim ? lim - pos[pos.length-1] : 0;
-             for (let i = 0; i < pos.length; i++) pos[i] += sh; }
-      arr.forEach((r, i) => offAt.set(r.key, pos[i]));
-    }
-  }
-
   // border distance perpendicular to a side, at distance `off` ALONG it:
   // rect = flat, diamond = angled face, circle = round.
   function borderPerp(shape, off, along, perp) {
@@ -198,10 +153,10 @@ export function orthogonalGeometry(graph, bounds) {
     if (shape === "circle")  return Math.sqrt(Math.max(0, perp*perp - off*off));
     return perp;
   }
-  function port(n, key) {
+  // a port on an explicit side, offset along that side
+  function makePort(n, side, off) {
     const { hw, hh } = Nodes.half(n);
     const shape = n.shape || "circle";
-    const side = sideAt.get(key), off = offAt.get(key) || 0;
     if (side === "t" || side === "b") {
       const px = wx(gx(n.x + off));
       const by = borderPerp(shape, px - n.x, hw, hh);
@@ -236,22 +191,75 @@ export function orthogonalGeometry(graph, bounds) {
     if (!pa.vert && !pb.vert) { const mx = (a.x+b.x)/2; return [a, {x:mx,y:a.y}, {x:mx,y:b.y}, b]; }
     return pa.vert ? [a, {x:a.x,y:b.y}, b] : [a, {x:b.x,y:a.y}, b];
   }
-
-  return edges.map((e, ei) => {
-    const a = nodes[e.source], b = nodes[e.target];
-    const pa = port(a, ei*2), pb = port(b, ei*2+1);
+  const polyLen = poly => { let s = 0;
+    for (let i = 1; i < poly.length; i++) s += Math.abs(poly[i].x-poly[i-1].x) + Math.abs(poly[i].y-poly[i-1].y);
+    return s; };
+  // route between two explicit ports; null if A* can't reach
+  function routePorts(pa, pb) {
     const oa = outer(pa), ob = outer(pb);
     const path = oa && ob ? astar(oa.c, oa.r, ob.c, ob.r) : null;
-    let poly;
-    if (path) {
-      poly = [{ x: pa.x, y: pa.y }];
-      for (const p of path) poly.push({ x: wx(p.x), y: wy(p.y) });
-      poly.push({ x: pb.x, y: pb.y });
-      poly = simplify(poly);
-    } else {
-      poly = elbow(pa, pb);
+    if (!path) return null;
+    const poly = [{ x: pa.x, y: pa.y }];
+    for (const p of path) poly.push({ x: wx(p.x), y: wy(p.y) });
+    poly.push({ x: pb.x, y: pb.y });
+    return simplify(poly);
+  }
+
+  // PHASE 1 — choose sides per edge by MINIMISING BENDS (centre ports). A thin
+  // vertical channel that would force A* to wrap loses to the clean side-to-side
+  // route; ties prefer the vertical pair so stacked flowchart edges flow downward.
+  const sides = edges.map(e => {
+    const a = nodes[e.source], b = nodes[e.target];
+    const cands = candidateSides(a, b);
+    let best = null;
+    for (let ci = 0; ci < cands.length; ci++) {
+      const poly = routePorts(makePort(a, cands[ci][0], 0), makePort(b, cands[ci][1], 0));
+      const bends = poly ? poly.length - 2 : Infinity;
+      const score = bends * 1e6 + ci * 1e3 + (poly ? polyLen(poly) : 1e9);  // bends ≫ vertical-bias ≫ length
+      if (!best || score < best.score) best = { sides: cands[ci], score };
     }
-    return { poly, a, b };
+    return best.sides;
+  });
+
+  // PHASE 2 — offsets along each chosen side: lean toward the endpoint, then
+  // de-collide edges sharing a side (single-edge sides stay centred; trunk at 0).
+  const SEP = C.cell + 6;
+  const offAt = new Map();
+  {
+    const groups = new Map();
+    const add = (ni, side, key, n, other) => {
+      const { hw, hh } = Nodes.half(n);
+      const along = (side === "t" || side === "b") ? hw : hh;
+      const axis  = (side === "t" || side === "b") ? other.x - n.x : other.y - n.y;
+      const lim = along * (nodes[ni].shape === "diamond" ? 0.5 : 0.7);
+      const gk = ni + ":" + side;
+      (groups.get(gk) || groups.set(gk, []).get(gk)).push({ key, want: clamp(axis, -lim, lim), along });
+    };
+    edges.forEach((e, ei) => {
+      add(e.source, sides[ei][0], ei*2,   nodes[e.source], nodes[e.target]);
+      add(e.target, sides[ei][1], ei*2+1, nodes[e.target], nodes[e.source]);
+    });
+    for (const arr of groups.values()) {
+      if (arr.length === 1) { offAt.set(arr[0].key, 0); continue; }
+      arr.sort((p, q) => p.want - q.want);
+      const pos = arr.map(r => r.want);
+      for (let i = 1; i < pos.length; i++) if (pos[i] < pos[i-1] + SEP) pos[i] = pos[i-1] + SEP;
+      for (let i = pos.length-2; i >= 0; i--) if (pos[i] > pos[i+1] - SEP) pos[i] = pos[i+1] - SEP;
+      const lim = arr[0].along * 0.82, span = pos[pos.length-1] - pos[0];
+      if (span > 2*lim) for (let i = 0; i < pos.length; i++) pos[i] = -lim + 2*lim*i/(pos.length-1);
+      else { const sh = pos[0] < -lim ? -lim - pos[0] : pos[pos.length-1] > lim ? lim - pos[pos.length-1] : 0;
+             for (let i = 0; i < pos.length; i++) pos[i] += sh; }
+      arr.forEach((r, i) => offAt.set(r.key, pos[i]));
+    }
+  }
+
+  // PHASE 3 — final geometry with offset ports.
+  return edges.map((e, ei) => {
+    const a = nodes[e.source], b = nodes[e.target];
+    const pa = makePort(a, sides[ei][0], offAt.get(ei*2) || 0);
+    const pb = makePort(b, sides[ei][1], offAt.get(ei*2+1) || 0);
+    const poly = routePorts(pa, pb) || elbow(pa, pb);
+    return { poly, a, b, sides: sides[ei] };
   });
 }
 

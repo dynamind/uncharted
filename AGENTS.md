@@ -55,13 +55,15 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   grid **A\*** (turn-penalised) around node obstacles (+margin), connected via axis-
   aligned **ports** (route between points *outside* the boxes — never let the jog
   happen inside a box, or the endpoint clip turns it into a diagonal). Side choice
-  (`sidesForEdge`, exported + tested) is driven by the **gaps between box edges widened
-  by the routing margin**, not centres: top/bottom only when a clean vertical channel
-  exists (`vGap >= 2*margin + cell`); if the boxes overlap vertically but sit
-  side-by-side, the near left/right sides are used (a still-higher *centre*, or a gap
-  smaller than the margins, would otherwise force a needless S — this is the bug the
-  margin term fixes). Vertical clearance wins ties so stacked flowchart edges flow down.
-  See `test/router.test.js` for the exact expected ports/bends per scenario. Ports also
+  is chosen per edge by **minimising bends**: `orthogonalGeometry` routes both candidate
+  orientations (`candidateSides`: the vertical pair and the horizontal pair) with centre
+  ports and keeps whichever yields fewer bends; ties prefer the **vertical** pair so
+  stacked flowchart edges keep flowing down. This beats any analytic gap threshold —
+  it directly *sees* when a thin channel forces A* to wrap (that was the 4-bend band).
+  Each result carries its chosen `sides` for testing. Invariant (test/router.test.js):
+  sweeping a side-by-side box through a vertical range, the route **never exceeds 2
+  bends** (a ≤2-bend route always exists when one axis has clearance; near-overlap on
+  BOTH axes is the only case that detours, and that's unavoidable). Ports also
   **lean** toward the other
   endpoint, then **de-collided per node-side** (`offAt` map): edges sharing a side are
   spread to distinct slots (min SEP), single-edge sides stay centred, trunk children
