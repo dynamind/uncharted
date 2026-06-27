@@ -40,7 +40,11 @@ attack it.
   per-edge rendered polylines. Modes: `straight | curved | orthogonal`. Orthogonal is
   grid **A\*** (turn-penalised) around node obstacles (+margin), connected via axis-
   aligned **ports** (route between points *outside* the boxes — never let the jog
-  happen inside a box, or the endpoint clip turns it into a diagonal).
+  happen inside a box, or the endpoint clip turns it into a diagonal). Ports prefer
+  **top/bottom** for cross-layer edges (flowchart flow) and **lean** toward the other
+  endpoint (clamped in the side) so the trunk stays centred/straight while branches
+  enter from the top with a mid-way jog. Constructive solvers **snap exactly onto their
+  on-grid targets when settled**, so ports/edges line up to the pixel (no ~1px drift).
 - **CROSSINGS ARE COMPUTED ON THE ACTUAL RENDERED POLYLINES** (`Renderer.crossings`,
   bbox prefilter + segment test) — the metric AND the hops read from the same points,
   so a hop only ever appears where the drawn lines truly cross. (This replaced the old

@@ -678,7 +678,13 @@ function makeConstructive(name, computeTargets) {
           n.y += (t.y - n.y) * 0.14;
           maxd = Math.max(maxd, Math.abs(t.x - n.x) + Math.abs(t.y - n.y));
         }
-        if (maxd < 0.5) settled = true;
+        if (maxd < 0.5) {                     // land exactly on targets (on-grid) → crisp edges
+          for (let i = 0; i < ns.length; i++) {
+            const n = ns[i], t = targets[i];
+            if (t && !n.fixed) { n.x = t.x; n.y = t.y; }
+          }
+          settled = true;
+        }
       },
     };
   };
@@ -1104,19 +1110,25 @@ function orthogonalGeometry(graph, bounds) {
     return path.reverse();
   }
 
-  // a port: the centre of the node side facing `toward`, snapped to a grid line
-  // so the stub out of the box is perfectly axis-aligned.
+  // A port: where the edge meets the box. Cross-layer edges use the TOP/BOTTOM
+  // side (flowchart flow downward); the attach point LEANS toward the other
+  // endpoint (clamped inside the side, snapped to grid) — so the trunk stays
+  // centred and dead straight, while a branch angles toward its target and its
+  // jog sits mid-way. Same-layer edges use the left/right side.
+  const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
   function port(n, toward) {
     const { hw, hh } = Nodes.half(n);
     const dx = toward.x - n.x, dy = toward.y - n.y;
-    if (Math.abs(dy) >= Math.abs(dx)) {
-      const col = gx(n.x), down = dy >= 0;
-      return { x: wx(col), y: n.y + (down ? hh : -hh), col, row: gy(n.y + (down ? hh : -hh)),
-               step: down ? [0,1] : [0,-1], vert: true };
+    if (Math.abs(dy) > 6) {                                   // cross-layer → top/bottom
+      const down = dy > 0;
+      const px = wx(gx(clamp(n.x + dx, n.x - hw*0.6, n.x + hw*0.6)));
+      const y = n.y + (down ? hh : -hh);
+      return { x: px, y, col: gx(px), row: gy(y), step: down ? [0,1] : [0,-1], vert: true };
     }
-    const row = gy(n.y), right = dx >= 0;
-    return { x: n.x + (right ? hw : -hw), y: wy(row), col: gx(n.x + (right ? hw : -hw)), row,
-             step: right ? [1,0] : [-1,0], vert: false };
+    const right = dx >= 0;                                    // same layer → left/right
+    const py = wy(gy(clamp(n.y + dy, n.y - hh*0.6, n.y + hh*0.6)));
+    const x = n.x + (right ? hw : -hw);
+    return { x, y: py, col: gx(x), row: gy(py), step: right ? [1,0] : [-1,0], vert: false };
   }
   // first free cell stepping outward from a port (past its node's margin)
   function outer(p) {
