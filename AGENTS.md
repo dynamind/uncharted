@@ -55,10 +55,14 @@ attack it.
   (crossings + edge length + overlap + border). The headline metaheuristic.
 - `hillclimb` — same neighborhood as SA but greedy (T=0). Shows local-minima trapping.
 - `layered` — Sugiyama-lite: **longest-path layering along edge direction** (sources on
-  top) + barycentre crossing reduction + **priority/median x-alignment** (each node →
-  median of its neighbours, higher-degree wins ties; `alignTo(±1)` sweeps) so chains sit
-  in one column and the orthogonal router draws them as a single straight line — far
-  fewer bends. The Dagre/ELK analogue. Pair with orthogonal routing for the flowchart.
+  top) + barycentre crossing reduction + **priority/median x-alignment** (`alignTo(±1)`).
+  - **Trunk mode** (`params.trunk`, "Straight trunks" toggle, default on): each node's
+    *primary child* = the one with the deepest downstream chain; primary parent↔child
+    links are hard-aligned (priority 1e6) so the main flow is one straight column and
+    branches get shoved to the side. Toggle off = balanced/symmetric (median of all).
+  - Box centres are **snapped to the orthogonal routing lattice** (phase 4) so ports sit
+    dead-centre and aligned chains share an exact column.
+  The Dagre/ELK analogue. Pair with orthogonal routing for the flowchart.
 - `circular` — nodes on a ring; baseline + reorder. Cheap contrast.
 
 ## Routing & the flowchart example
@@ -92,10 +96,16 @@ approximates it physically; constructive solvers (layered/circular) target struc
 - The length term penalises |len − k| (deviation from ideal), NOT raw length —
   raw length made SA collapse the graph to a point. Do not regress this.
 
+## Speed control
+
+- The Speed slider indexes a `SPEEDS` table; `state.speedRate` is *steps per frame* and
+  may be **< 1**. `frame()` accumulates it (`state._accum`) and runs `floor` steps, so the
+  low end animates genuinely slowly (down to 0.15 steps/frame).
+
 ## TODO / ideas not yet done
 
 - Real ELK backend behind the facade (would validate the seam).
-- Orthogonal routing: separate parallel edges into distinct channels (they can overlap
+- Orthogonal routing: separate parallel edges into distinct **channels** (they can overlap
   in a shared lane now); dummy nodes for long layered edges + Brandes–Köpf x-coords.
 - Arrowheads on directed edges (the flowchart reads as undirected lines today).
 - Best-cost-so-far tracking / a convergence sparkline; A/B race two solvers.

@@ -204,7 +204,7 @@
       </div>
       <div class="row">
         <label>Speed</label>
-        <input id="rng-speed" type="range" min="1" max="40" value="6" />
+        <input id="rng-speed" type="range" min="0" max="12" value="6" />
         <div class="val" id="val-speed">6</div>
       </div>
     </div>
@@ -260,6 +260,7 @@
         </select>
       </div>
       <label class="toggle"><input type="checkbox" id="tg-hops" checked /><span class="box"></span><span class="t">Crossing hops</span></label>
+      <label class="toggle"><input type="checkbox" id="tg-trunk" checked /><span class="box"></span><span class="t">Straight trunks <span style="color:var(--ink-faint)">· layered</span></span></label>
       <label class="toggle"><input type="checkbox" id="tg-labels" /><span class="box"></span><span class="t">Node labels</span></label>
     </div>
 
@@ -706,11 +707,16 @@ function circularTargets(graph, bounds) {
 }
 
 // Layered (Sugiyama-lite): the Dagre / ELK-family approach in four classic phases.
-function layeredTargets(graph, bounds) {
+function layeredTargets(graph, bounds, params) {
   const { nodes, edges } = graph;
   const N = nodes.length;
+  const trunk = !params || params.trunk !== false;   // straighten primary paths
   const adj = nodes.map(() => []);                  // undirected, for ordering
-  edges.forEach(e => { adj[e.source].push(e.target); adj[e.target].push(e.source); });
+  const outAdj = nodes.map(() => []), inAdj = nodes.map(() => []);
+  edges.forEach(e => {
+    adj[e.source].push(e.target); adj[e.target].push(e.source);
+    outAdj[e.source].push(e.target); inAdj[e.target].push(e.source);
+  });
 
   // 1. layer assignment — longest-path along edge DIRECTION (source→target), so
   //    a DAG/flowchart flows top-down with its sources on top. Presets build
@@ -752,6 +758,22 @@ function layeredTargets(graph, bounds) {
   const median = vals => { vals.sort((p, q) => p - q); const m = vals.length >> 1;
     return vals.length % 2 ? vals[m] : (vals[m-1] + vals[m]) / 2; };
 
+  // TRUNK: pick each node's primary child (the one with the deepest downstream
+  // chain) and the matching primary parent. Hard-aligning these links keeps the
+  // main flow dead straight; secondary branches get medianed and shoved aside.
+  const depth = new Array(N).fill(-1);
+  const calcDepth = u => { if (depth[u] >= 0) return depth[u]; depth[u] = 0;
+    let d = 0; for (const v of outAdj[u]) d = Math.max(d, calcDepth(v) + 1);
+    return (depth[u] = d); };
+  for (let i = 0; i < N; i++) calcDepth(i);
+  const primChild = new Array(N).fill(-1), primParent = new Array(N).fill(-1);
+  for (let u = 0; u < N; u++) { let best = -1, bd = -1;
+    for (const v of outAdj[u]) if (depth[v] > bd) { bd = depth[v]; best = v; }
+    primChild[u] = best; }
+  for (let v = 0; v < N; v++) { let best = -1, bd = -1;
+    for (const u of inAdj[v]) if (primChild[u] === v && depth[u] > bd) { bd = depth[u]; best = u; }
+    primParent[v] = best; }
+
   // align every layer to its neighbours `dl` layers away (-1 = parents above)
   function alignTo(dl) {
     const seq = []; for (let l = 0; l <= maxL; l++) seq.push(l);
@@ -760,6 +782,9 @@ function layeredTargets(graph, bounds) {
       const arr = order[l]; if (arr.length < 1) continue;
       const want = {}, prio = {};
       for (const id of arr) {
+        // trunk: hard-align to the primary link so the main path stays straight
+        const prim = dl < 0 ? primParent[id] : primChild[id];
+        if (trunk && prim !== -1) { want[id] = x[prim]; prio[id] = 1e6; continue; }
         const nb = [];
         for (const v of adj[id]) if (layer[v] === l + dl) nb.push(x[v]);
         want[id] = nb.length ? median(nb) : x[id];
@@ -792,9 +817,13 @@ function layeredTargets(graph, bounds) {
   for (let pass = 0; pass < 4; pass++) { alignTo(-1); alignTo(+1); }
   alignTo(-1);                                          // finish top-down for tidy chains
 
-  // 4. coordinate assignment — layer → y; aligned x mapped/scaled into bounds
+  // 4. coordinate assignment — layer → y; aligned x mapped/scaled into bounds, then
+  //    snapped to the routing lattice so box centres land on grid lines (ports sit
+  //    dead-centre and aligned chains share an exact column → crisp straight edges).
   const W = bounds.x1 - bounds.x0, H = bounds.y1 - bounds.y0;
   const cx = (bounds.x0 + bounds.x1) / 2;
+  const bx = bounds.x0 - 36, by = bounds.y0 - 36;            // matches orthogonal grid origin
+  const snap = (v, base) => base + Math.round((v - base) / ORTHO.cell) * ORTHO.cell;
   let minx = Infinity, maxx = -Infinity;
   for (const v of x) { if (v < minx) minx = v; if (v > maxx) maxx = v; }
   const mid = (minx + maxx) / 2, span = maxx - minx;
@@ -802,8 +831,8 @@ function layeredTargets(graph, bounds) {
   const t = new Array(N);
   for (let i = 0; i < N; i++) {
     t[i] = {
-      x: cx + (x[i] - mid) * scale,
-      y: bounds.y0 + (maxL === 0 ? H/2 : H * layer[i] / maxL),
+      x: snap(cx + (x[i] - mid) * scale, bx),
+      y: snap(bounds.y0 + (maxL === 0 ? H/2 : H * layer[i] / maxL), by),
     };
   }
   return t;
@@ -1182,10 +1211,12 @@ const App = (() => {
     solverName: "force",
     presetName: "tree",
     running: false,
-    speed: 6,
+    speedRate: 6,                              // solver steps per frame (may be < 1)
+    _accum: 0,
     params: {
       spacing: 0.62, gravity: 0.03,           // force-directed knobs
       cooling: 0.97,                           // annealing / hillclimb schedule
+      trunk: true,                             // layered: straighten primary paths
       weights: { cross: 1, len: 1, overlap: 1 }, // cost objective weights
     },
     opts: { routing: "curved", hops: true, labels: false },
@@ -1276,8 +1307,12 @@ const App = (() => {
 
   function frame() {
     if (state.running && state.solver) {
-      for (let i = 0; i < state.speed; i++) {
-        if (state.solver.done) { setRunning(false); break; }
+      // accumulate fractional rate so speeds below 1 step/frame animate slowly
+      state._accum += state.speedRate;
+      let budget = Math.floor(state._accum);
+      state._accum -= budget;
+      while (budget-- > 0) {
+        if (state.solver.done) { setRunning(false); state._accum = 0; break; }
         state.solver.step();
       }
     }
@@ -1352,14 +1387,22 @@ const App = (() => {
       seedPositions(state.graph, state.bounds); buildSolver(); setRunning(true);
     });
 
+    const SPEEDS = [0.15, 0.25, 0.4, 0.6, 1, 2, 4, 6, 9, 13, 18, 28, 40];
     const sp = document.getElementById("rng-speed");
-    sp.addEventListener("input", () => {
-      state.speed = +sp.value;
-      document.getElementById("val-speed").textContent = sp.value;
-    });
+    const applySpeed = () => {
+      const rate = SPEEDS[+sp.value];
+      state.speedRate = rate;
+      document.getElementById("val-speed").textContent = rate < 1 ? rate.toFixed(2) : String(rate);
+    };
+    sp.addEventListener("input", applySpeed);
+    applySpeed();
 
     document.getElementById("sel-routing").addEventListener("change", e => state.opts.routing = e.target.value);
     document.getElementById("tg-hops").addEventListener("change", e => state.opts.hops = e.target.checked);
+    document.getElementById("tg-trunk").addEventListener("change", e => {
+      state.params.trunk = e.target.checked;
+      if (state.solverName === "layered") { buildSolver(); setRunning(true); }  // recompute targets
+    });
     document.getElementById("tg-labels").addEventListener("change", e => state.opts.labels = e.target.checked);
 
     // parameter sliders: live-bind to state.params; weights apply immediately,
