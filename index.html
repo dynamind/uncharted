@@ -1110,25 +1110,35 @@ function orthogonalGeometry(graph, bounds) {
     return path.reverse();
   }
 
-  // A port: where the edge meets the box. Cross-layer edges use the TOP/BOTTOM
-  // side (flowchart flow downward); the attach point LEANS toward the other
-  // endpoint (clamped inside the side, snapped to grid) — so the trunk stays
-  // centred and dead straight, while a branch angles toward its target and its
-  // jog sits mid-way. Same-layer edges use the left/right side.
+  // Which side of n faces `toward`: top/bottom for cross-layer (flowchart flow),
+  // left/right for same-layer edges.
   const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
-  function port(n, toward) {
-    const { hw, hh } = Nodes.half(n);
+  const sideOf = (n, toward) => {
     const dx = toward.x - n.x, dy = toward.y - n.y;
-    if (Math.abs(dy) > 6) {                                   // cross-layer → top/bottom
-      const down = dy > 0;
-      const px = wx(gx(clamp(n.x + dx, n.x - hw*0.6, n.x + hw*0.6)));
-      const y = n.y + (down ? hh : -hh);
-      return { x: px, y, col: gx(px), row: gy(y), step: down ? [0,1] : [0,-1], vert: true };
+    return Math.abs(dy) > 6 ? (dy > 0 ? "b" : "t") : (dx >= 0 ? "r" : "l");
+  };
+  // How many edges leave each side of each node — so we only spread when needed.
+  const sideCount = nodes.map(() => ({ t: 0, b: 0, l: 0, r: 0 }));
+  for (const e of edges) {
+    sideCount[e.source][sideOf(nodes[e.source], nodes[e.target])]++;
+    sideCount[e.target][sideOf(nodes[e.target], nodes[e.source])]++;
+  }
+
+  // A port: where the edge meets the box. A side with ONE edge connects at its
+  // centre (clean straight pass-through). A side with several edges leans each
+  // toward its own endpoint, so branches fan out / merges spread — and because
+  // the lean is toward the target, the trunk (target straight below) stays at 0.
+  function port(n, idx, toward) {
+    const { hw, hh } = Nodes.half(n);
+    const side = sideOf(n, toward), multi = sideCount[idx][side] > 1;
+    if (side === "t" || side === "b") {
+      const lean = multi ? clamp(toward.x - n.x, -hw*0.6, hw*0.6) : 0;
+      const px = wx(gx(n.x + lean)), y = n.y + (side === "b" ? hh : -hh);
+      return { x: px, y, col: gx(px), row: gy(y), step: side === "b" ? [0,1] : [0,-1], vert: true };
     }
-    const right = dx >= 0;                                    // same layer → left/right
-    const py = wy(gy(clamp(n.y + dy, n.y - hh*0.6, n.y + hh*0.6)));
-    const x = n.x + (right ? hw : -hw);
-    return { x, y: py, col: gx(x), row: gy(py), step: right ? [1,0] : [-1,0], vert: false };
+    const lean = multi ? clamp(toward.y - n.y, -hh*0.6, hh*0.6) : 0;
+    const py = wy(gy(n.y + lean)), x = n.x + (side === "r" ? hw : -hw);
+    return { x, y: py, col: gx(x), row: gy(py), step: side === "r" ? [1,0] : [-1,0], vert: false };
   }
   // first free cell stepping outward from a port (past its node's margin)
   function outer(p) {
@@ -1158,7 +1168,7 @@ function orthogonalGeometry(graph, bounds) {
 
   return edges.map(e => {
     const a = nodes[e.source], b = nodes[e.target];
-    const pa = port(a, b), pb = port(b, a);
+    const pa = port(a, e.source, b), pb = port(b, e.target, a);
     const oa = outer(pa), ob = outer(pb);
     let poly;
     const path = oa && ob ? astar(oa.c, oa.r, ob.c, ob.r) : null;
