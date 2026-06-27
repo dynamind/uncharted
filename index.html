@@ -433,6 +433,20 @@ const Objective = {
     }
     return out;
   },
+  // edges that run THROUGH a non-incident node's body. Geometrically these are
+  // crossings too; counting them stops hillclimb/SA hiding an edge inside a node
+  // to fake a 0-crossing layout (the Q₃ cube-in-cube trap the user hit).
+  nodePierces(graph) {
+    const { nodes, edges } = graph; let n = 0;
+    for (const e of edges) {
+      const a = nodes[e.source], b = nodes[e.target];
+      for (let k = 0; k < nodes.length; k++) {
+        if (k === e.source || k === e.target) continue;
+        if (Nodes.segHitsBody(nodes[k], a.x, a.y, b.x, b.y)) n++;
+      }
+    }
+    return n;
+  },
   totalLength(graph) {
     let s = 0;
     for (const e of graph.edges) {
@@ -460,10 +474,11 @@ const Objective = {
       }
     return p;
   },
-  // weighted total — what SA/hillclimb minimise and what the HUD shows
+  // weighted total — what SA/hillclimb minimise. A node-pierce counts as a
+  // crossing (same weight) so the optimiser can't route through a node for free.
   full(graph, bounds, w) {
     const k = this.idealK(graph, bounds);
-    const cr = this.crossings(graph).length;
+    const cr = this.crossings(graph).length + this.nodePierces(graph);
     const lenPen = this.lengthPenalty(graph, k);
     const ov = this.overlap(graph);
     return w.cross*cr*10 + w.len*lenPen + w.overlap*(ov/this.minDist);
@@ -587,6 +602,18 @@ function makeAnnealer(greedy) {
           const c = nodes[f.source], d = nodes[f.target];
           if (Geo.segInt(a.x,a.y,b.x,b.y, c.x,c.y,d.x,d.y)) cr++;
         }
+        // this edge piercing any non-incident node (it moved with i)
+        for (let k2 = 0; k2 < nodes.length; k2++) {
+          if (k2 === e.source || k2 === e.target) continue;
+          if (Nodes.segHitsBody(nodes[k2], a.x,a.y,b.x,b.y)) cr++;
+        }
+      }
+      // other edges now piercing node i (i moved into/out of them)
+      for (let fj = 0; fj < edges.length; fj++) {
+        const f = edges[fj];
+        if (f.source === i || f.target === i) continue;
+        const c = nodes[f.source], d = nodes[f.target];
+        if (Nodes.segHitsBody(n, c.x,c.y,d.x,d.y)) cr++;
       }
       for (let j = 0; j < nodes.length; j++) {
         if (j === i) continue;
@@ -861,6 +888,24 @@ const Renderer = (() => {
     return out;
   }
 
+  // edges whose RENDERED polyline runs through a non-incident node's body. Same
+  // idea as crossings, but for the parallel-to-nothing case segInt can't see: a
+  // line ploughing across a node. Counted in the HUD so the metric can't lie
+  // (orthogonal A* routes around nodes, so this is ~0 there; it bites the straight
+  // routing the energy solvers use). One hit per (edge, node).
+  function nodePierces(geom, nodes) {
+    const out = [];
+    for (let i = 0; i < geom.length; i++) {
+      const g = geom[i], p = g.poly;
+      for (const n of nodes) {
+        if (n === g.a || n === g.b) continue;
+        for (let s = 1; s < p.length; s++)
+          if (Nodes.segHitsBody(n, p[s-1].x, p[s-1].y, p[s].x, p[s].y)) { out.push({ eA: i, node: n }); break; }
+      }
+    }
+    return out;
+  }
+
   function draw(ctx, view, graph, geom, crossings, opts) {
     ctx.clearRect(0, 0, view.w, view.h);
 
@@ -970,7 +1015,7 @@ const Renderer = (() => {
     ctx.stroke();
   }
 
-  return { crossings, draw, SAMPLES };
+  return { crossings, nodePierces, draw, SAMPLES };
 })();
 
 
@@ -993,6 +1038,7 @@ const App = (() => {
     graph: null,
     geom: [],
     crossings: [],
+    pierces: [],
     solver: null,
     solverName: "force",
     presetName: "tree",
@@ -1074,6 +1120,7 @@ const App = (() => {
     state.geom = edgeGeometry(state.graph, mode, state.bounds, state._prevSides);
     state._prevSides = mode === "orthogonal" ? state.geom.map(g => g.sides) : null;
     state.crossings = Renderer.crossings(state.geom);
+    state.pierces = Renderer.nodePierces(state.geom, state.graph.nodes);
   }
 
   function cost() {
@@ -1082,8 +1129,9 @@ const App = (() => {
 
   function updateMetricChips(full) {
     const s = state.solver;
+    const crossTotal = state.crossings.length + state.pierces.length;
     document.getElementById("hud-iter").textContent = s ? s.iter : 0;
-    document.getElementById("hud-cross").textContent = state.crossings.length;
+    document.getElementById("hud-cross").textContent = crossTotal;
     document.getElementById("hud-cost").textContent = Math.round(cost());
     const tempChip = document.getElementById("hud-temp");
     if (tempChip) {
@@ -1094,7 +1142,7 @@ const App = (() => {
       document.getElementById("m-nodes").textContent = state.graph.nodes.length;
       document.getElementById("m-edges").textContent = state.graph.edges.length;
     }
-    document.getElementById("m-cross").textContent = state.crossings.length;
+    document.getElementById("m-cross").textContent = crossTotal;
     document.getElementById("m-cost").textContent = Math.round(cost());
   }
 

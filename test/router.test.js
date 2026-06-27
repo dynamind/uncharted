@@ -258,6 +258,41 @@ describe("channel separation — co-running edges fan into parallel tracks", () 
   });
 });
 
+// An edge that runs through a non-incident node's interior is a crossing too —
+// otherwise a solver hides an edge inside a node and reports a fake 0 (the Q₃
+// cube-in-cube trap). Nodes.segHitsBody is the pure test the metric uses.
+describe("segHitsBody — an edge ploughing through a node counts", () => {
+  const circle = (x, y) => ({ x, y, shape: "circle" });
+  it("a line straight through a node body is a hit; one clearing it is not", () => {
+    const n = rect(400, 300);
+    expect(Nodes.segHitsBody(n, 200, 300, 600, 300)).toBe(true);   // dead through the centre
+    expect(Nodes.segHitsBody(n, 200, 100, 600, 100)).toBe(false);  // well above
+  });
+  it("ignores a sub-3px corner graze (no false positive)", () => {
+    const n = rect(400, 300, 98, 40);                               // body x∈[351,449], y∈[280,320]
+    // a line passing just outside the top-left corner, barely clipping it
+    expect(Nodes.segHitsBody(n, 351, 280 - 30, 351 - 30, 280)).toBe(false);
+  });
+  it("respects shape: a diamond's bbox corner is empty, its waist is solid", () => {
+    const d = diamond(400, 300, 104, 56);                           // hw=52, hh=28
+    expect(Nodes.segHitsBody(d, 200, 300, 600, 300)).toBe(true);    // through the waist
+    // a vertical line near a bbox corner (x=450, inside the bbox) — the diamond
+    // has tapered to a sliver there, so the chord only grazes < 3px and misses
+    expect(Nodes.segHitsBody(d, 450, 200, 450, 400)).toBe(false);
+  });
+  it("circle: a chord through the centre hits, a far miss does not", () => {
+    const c = circle(300, 300);
+    expect(Nodes.segHitsBody(c, 200, 300, 400, 300)).toBe(true);
+    expect(Nodes.segHitsBody(c, 200, 280, 400, 280)).toBe(false);   // > R above
+  });
+  it("skips the segment's own endpoints' nodes by caller contract (endpoints inside)", () => {
+    // a segment that STARTS at the node centre still reports a hit — callers must
+    // skip incident nodes themselves (Objective/Renderer do).
+    const n = rect(400, 300);
+    expect(Nodes.segHitsBody(n, 400, 300, 700, 300)).toBe(true);
+  });
+});
+
 describe("orthogonal routing invariants", () => {
   it("every edge connects on both node borders, axis-aligned", () => {
     const a = rect(180, 280), b = rect(540, 470);

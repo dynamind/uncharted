@@ -61,6 +61,41 @@ export const Nodes = {
     }
     return Geo.dist(x, y, n.x, n.y) <= this.R + 5;
   },
+  // Does segment (x1,y1)->(x2,y2) pass THROUGH node n's body (not merely graze a
+  // corner)? An edge that runs across a non-incident node's interior is, visually
+  // and combinatorially, a crossing — without this a solver can hide an edge
+  // inside a node and report a fake 0 crossings (the Q₃ "cube-in-cube" trap). We
+  // clip the segment to the (convex) shape and require a real penetration depth.
+  segHitsBody(n, x1, y1, x2, y2) {
+    const { hw, hh } = this.half(n);
+    const ax = x1 - n.x, ay = y1 - n.y, dx = x2 - x1, dy = y2 - y1;
+    const L = Math.hypot(dx, dy) || 1;
+    const MIN = 3;                                   // ignore sub-3px grazes
+    const shape = n.shape || "circle";
+    let t0 = 0, t1 = 1;
+    if (shape === "circle") {
+      // |(ax,ay) + t·(dx,dy)| ≤ R  →  A t² + B t + C ≤ 0
+      const A = dx*dx + dy*dy, B = 2*(ax*dx + ay*dy), C = ax*ax + ay*ay - this.R*this.R;
+      const disc = B*B - 4*A*C;
+      if (disc <= 0) return false;
+      const sq = Math.sqrt(disc);
+      t0 = (-B - sq) / (2*A); t1 = (-B + sq) / (2*A);
+    } else {
+      // convex body as half-planes nx·x + ny·y ≤ c; clip [0,1] to the inside.
+      const planes = shape === "diamond"
+        ? [[1/hw, 1/hh, 1], [1/hw, -1/hh, 1], [-1/hw, 1/hh, 1], [-1/hw, -1/hh, 1]]
+        : [[1, 0, hw], [-1, 0, hw], [0, 1, hh], [0, -1, hh]];
+      for (const [nx, ny, c] of planes) {
+        const denom = nx*dx + ny*dy, num = c - (nx*ax + ny*ay);   // inside ⇔ denom·t ≤ num
+        if (Math.abs(denom) < 1e-12) { if (num < 0) return false; }
+        else if (denom > 0) t1 = Math.min(t1, num/denom);
+        else t0 = Math.max(t0, num/denom);
+        if (t0 > t1) return false;
+      }
+    }
+    t0 = Math.max(0, t0); t1 = Math.min(1, t1);
+    return (t1 - t0) * L > MIN;
+  },
 };
 
 export const ORTHO = { cell: 15, margin: 11, turn: 8 };

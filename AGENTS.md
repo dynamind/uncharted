@@ -112,6 +112,16 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   chord-based count, which made hops drift/flip/phantom over curves.) Hops bulge to a
   consistent side (up; right for vertical runs). `Objective.crossings` (chord-based)
   still exists but is only the SA/hillclimb *optimisation target*, not what's drawn.
+- **An edge running THROUGH a non-incident node's body counts as a crossing**
+  (`Nodes.segHitsBody` — clip the segment to the convex shape, require >3px penetration;
+  rect/diamond via half-plane clip, circle via the quadratic). Without it the energy
+  solvers cheat: hillclimb on Q₃ "found" a 0-crossing layout by hiding edges *inside*
+  nodes (segInt sees no edge–edge cross, so it read as free). Counted in BOTH domains,
+  each on its own geometry: `Objective.nodePierces` (chords, in `full` + the annealer's
+  `localCost`, weighted as a crossing) drives the solver away from it; `Renderer.nodePierces`
+  (rendered polylines) is added to the on-screen crossing count so the HUD can't lie.
+  Orthogonal A* routes around obstacles, so pierces are ~0 there — this bites the straight
+  routing the energy solvers use. The HUD shows `crossings.length + pierces.length`.
 
 ## Solver lineup (the point of the demo)
 
@@ -140,7 +150,8 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
 
 ## Cost function (combinatorial objective)
 
-`cost = w_cross*crossings + w_len*Σ edgeLength + w_overlap*nodeOverlaps + w_border*offscreen`
+`cost = w_cross*(crossings + nodePierces) + w_len*Σ edgeLength + w_overlap*nodeOverlaps + w_border*offscreen`
+(an edge through a non-incident node body — `nodePierces` — is weighted as a crossing)
 Weights are user-tunable sliders. SA/hillclimb optimize this directly; force-directed
 approximates it physically; constructive solvers (layered/circular) target structure.
 
@@ -163,12 +174,16 @@ approximates it physically; constructive solvers (layered/circular) target struc
   ports (no sibling crossings), A* seeded with the stub direction, grid-quantised length
   (no flicker), **hysteresis** (sticky + drag-steerable), and **channel separation**
   (`separateLanes` — co-running edges fanned into parallel tracks; verified in-browser on
-  K₆). All pinned by 20 Vitest tests
+  K₆). All pinned by 25 Vitest tests
   in `test/router.test.js` — the single best place to understand the routing contract.
   Run `npm test`. After ANY router change, also `npm run build` and check it stays a single
   file (`grep -c '<script src' dist/index.html` == 0).
 - The length term penalises |len − k| (deviation from ideal), NOT raw length —
   raw length made SA collapse the graph to a point. Do not regress this.
+- **An edge through a non-incident node counts as a crossing** (`Nodes.segHitsBody`,
+  `Objective.nodePierces` / `Renderer.nodePierces`) — see the crossings invariant above.
+  Stops hillclimb/SA faking 0 crossings on Q₃ by hiding edges inside nodes. Verified
+  in-browser: hillclimb now lands at an honest 2-crossing local minimum on the cube.
 
 ## Speed control
 
@@ -178,7 +193,8 @@ approximates it physically; constructive solvers (layered/circular) target struc
 
 ## NEXT TASK — arrowheads on directed edges
 
-Channel separation is DONE (post-process `separateLanes`, PHASE 4; 3 new tests, 20 total).
+Channel separation is DONE (post-process `separateLanes`, PHASE 4), and edge-through-node
+now counts as a crossing (`segHitsBody`/`nodePierces`). 25 router tests total.
 The flowchart still reads as undirected lines — there are no arrowheads. Add a directed
 glyph at the **target** end of each rendered polyline, pointing along the final segment's
 direction (the orthogonal routes already end axis-aligned, so the arrow is one of 4 cardinal
