@@ -144,6 +144,11 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
 
 - `flowchart` preset = a small DAG (rect boxes + decision diamonds + labels). Selecting
   it auto-switches to `layered` + `orthogonal` (see the `sel-graph` change handler).
+- `spindle` preset (`Presets.spindle`, "Fan-out / fan-in") = `Split → {A..E} → Merge`,
+  one **divergence** + one **convergence** in a DAG — the verification fixture for per-side
+  **port distribution** (Split's exit side and Merge's entry side should comb into evenly
+  spaced ports). Also auto-switches to `layered` + `orthogonal` + arrows. Best viewed in a
+  normal-width window (5 boxes in the middle row crowd the narrow Claude-Preview canvas).
 - Orthogonal A* is deferred during energy-based solver motion (force/annealing/hillclimb
   route straight until `done`, then snap to orthogonal) — see `activeRouting()`. Geometry
   is cached by a position+routing+done signature so A* doesn't run every idle frame.
@@ -169,7 +174,8 @@ approximates it physically; constructive solvers (layered/circular) target struc
   auto-on for the flowchart); shared `Objective`; all five solvers
   (`force`, `annealing`, `hillclimb`, `layered`, `circular`); **flowchart preset**;
   tunable cost-weight + cooling sliders; per-solver explainer; node dragging; keyboard
-  (space/S/R); 8 presets. Verified in-browser (Claude Preview), no console errors.
+  (space/S/R); 9 presets (incl. `spindle` — the fan-out/fan-in port-distribution fixture).
+  Verified in-browser (Claude Preview), no console errors.
 - **Orthogonal routing is mature** (this is where most recent effort went): bend-minimised
   side choice on BOTH ends, 1-bend L / bottom-to-side, U-turns for tight wedges, fan-order
   ports (no sibling crossings), A* seeded with the stub direction, grid-quantised length
