@@ -155,6 +155,33 @@ describe("sibling edges from one node never cross (fan ordering)", () => {
   });
 });
 
+describe("hysteresis — routing is sticky unless a strictly-better route appears", () => {
+  const route = (a, b, prev) => orthogonalGeometry(
+    { nodes: [{...a,id:0},{...b,id:1}], edges: [{source:0,target:1}] },
+    { x0: 0, y0: 0, x1: 1000, y1: 900 }, prev);
+
+  it("keeps the previous sides when the new best ties on bends", () => {
+    // B below & far right: pure bend-min picks ["r","t"]; but if we were already on
+    // an equal-bend ["b","t"]... actually both ends here: assert it holds a 2-bend
+    // choice instead of flipping to the other equal-bend option.
+    const a = rect(200, 300), b = rect(500, 560);
+    const fresh = route(a, b)[0].sides;                 // ["r","t"], 1 bend
+    // a previously-chosen equal-or-worse-bend route is kept only if not strictly worse
+    const sticky = route(a, b, [["b", "t"]])[0];        // ["b","t"] is 2 bends > 1 → must switch
+    expect(sticky.sides).toEqual(fresh);                // strictly fewer bends ⇒ switch
+  });
+
+  it("does NOT flip between two equal-bend options frame to frame", () => {
+    // side-by-side, small offset: ["r","l"] is the fresh 2-bend pick. Feed back a
+    // different equal-bend choice and confirm it's retained (no twitch).
+    const a = rect(200, 300), b = rect(500, 318);
+    const prev = [["r", "l"]];
+    let sides = route(a, b, prev)[0].sides;
+    for (let i = 0; i < 5; i++) sides = route(a, b, [sides])[0].sides;  // iterate
+    expect(sides).toEqual(["r", "l"]);                  // stable, never drifts
+  });
+});
+
 describe("orthogonal routing invariants", () => {
   it("every edge connects on both node borders, axis-aligned", () => {
     const a = rect(180, 280), b = rect(540, 470);

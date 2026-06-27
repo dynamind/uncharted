@@ -70,6 +70,11 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
     (b/b first) breaks ties deterministically.
   - A* is seeded with the **source stub direction** (`dirOf(pa.step)`); without it A*
     turns freely at the first cell and wastes the stub, adding a phantom bend.
+  - **Hysteresis**: `orthogonalGeometry(graph, bounds, prev)` takes the previous per-edge
+    `[srcSide, tgtSide]`; an edge KEEPS its previous sides unless the new best has
+    strictly FEWER bends. So routes don't twitch mid-drag, and the **drag direction picks
+    the side** (approach from the left → enters the left). The App holds the state
+    (`state._prevSides`, reset in `buildSolver`); tests omit `prev` → pure bend-min.
   - Several edges leaving the SAME side are ordered by **fan angle to their targets**
     (`fanKey`), not just by their lean — so siblings don't cross each other as one is
     dragged across (the nearer target turns first, on the outer port).

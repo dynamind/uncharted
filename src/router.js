@@ -93,7 +93,11 @@ class MinHeap {
 }
 
 /* ---- orthogonal (Manhattan) routing via grid A* -------------------------- */
-export function orthogonalGeometry(graph, bounds) {
+// `prev` (optional): the previously chosen [sourceSide, targetSide] per edge. When
+// supplied, an edge KEEPS its previous sides unless a strictly-fewer-bend route now
+// exists (hysteresis) — so routes don't twitch as a box is dragged, and the user can
+// pick a side by the direction they approach from. Tests omit `prev` → pure bend-min.
+export function orthogonalGeometry(graph, bounds, prev) {
   const { nodes, edges } = graph, C = ORTHO;
   const x0 = bounds.x0 - 36, y0 = bounds.y0 - 36;
   const cols = Math.ceil((bounds.x1 - x0 + 36) / C.cell) + 1;
@@ -231,7 +235,8 @@ export function orthogonalGeometry(graph, bounds) {
     const score = poly ? bends*1e7 + pref*1e4 + lenBucket(poly)*100 + idx : Infinity;
     return { s, bends, score };
   };
-  const sides = edges.map(e => {
+  const usePrev = prev && prev.length === edges.length;
+  const sides = edges.map((e, ei) => {
     const a = nodes[e.source], b = nodes[e.target];
     const ha = Nodes.half(a), hb = Nodes.half(b);
     const vGap = Math.max((b.y-hb.hh)-(a.y+ha.hh), (a.y-ha.hh)-(b.y+hb.hh));
@@ -253,6 +258,13 @@ export function orthogonalGeometry(graph, bounds) {
         const r = evalSides(a, b, s, 50, i);
         if (r.score < best.score) best = r;
       });
+    }
+    // hysteresis: stick with the previous sides unless the new best has strictly
+    // FEWER bends (a genuine improvement). Keeps the route from twitching as a box
+    // moves, and lets the drag direction choose the side.
+    if (usePrev && prev[ei]) {
+      const pr = evalSides(a, b, prev[ei], 0, 0);
+      if (pr.bends <= best.bends) return prev[ei];
     }
     return best.s;
   });
@@ -301,8 +313,8 @@ export function orthogonalGeometry(graph, bounds) {
 }
 
 /* ---- routing dispatch (straight | curved | orthogonal) ------------------- */
-export function edgeGeometry(graph, mode, bounds) {
-  if (mode === "orthogonal") return orthogonalGeometry(graph, bounds);
+export function edgeGeometry(graph, mode, bounds, prev) {
+  if (mode === "orthogonal") return orthogonalGeometry(graph, bounds, prev);
   const { nodes, edges } = graph;
   return edges.map((e, i) => {
     const a = nodes[e.source], b = nodes[e.target];

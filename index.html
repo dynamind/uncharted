@@ -999,6 +999,7 @@ const App = (() => {
     running: false,
     speedRate: 6,                              // solver steps per frame (may be < 1)
     _accum: 0,
+    _prevSides: null,                          // last orthogonal side choices (hysteresis)
     params: {
       spacing: 0.62, gravity: 0.03,           // force-directed knobs
       cooling: 0.97,                           // annealing / hillclimb schedule
@@ -1038,6 +1039,7 @@ const App = (() => {
 
   function buildSolver() {
     state.solver = LayoutEngine.create(state.solverName, state.graph, state.bounds, state.params);
+    state._prevSides = null;          // fresh layout → fresh routing (drop hysteresis memory)
     document.getElementById("hud-solver").textContent = state.solverName;
   }
 
@@ -1065,7 +1067,12 @@ const App = (() => {
     const sig = posSig();
     if (sig === _sig) return;
     _sig = sig;
-    state.geom = edgeGeometry(state.graph, activeRouting(), state.bounds);
+    const mode = activeRouting();
+    // pass last frame's chosen sides so orthogonal routing is sticky (hysteresis):
+    // the route only changes when a strictly-better one appears, so dragging a box
+    // doesn't make edges twitch — and the approach direction picks the side.
+    state.geom = edgeGeometry(state.graph, mode, state.bounds, state._prevSides);
+    state._prevSides = mode === "orthogonal" ? state.geom.map(g => g.sides) : null;
     state.crossings = Renderer.crossings(state.geom);
   }
 
