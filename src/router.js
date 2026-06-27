@@ -332,9 +332,15 @@ export function orthogonalGeometry(graph, bounds, prev) {
     return best.s;
   });
 
-  // PHASE 2 — offsets along each chosen side: lean toward the endpoint, then
-  // de-collide edges sharing a side (single-edge sides stay centred; trunk at 0).
-  const SEP = C.cell + 6;
+  // PHASE 2 — offsets along each chosen side. k edges sharing a side **divide the
+  // side into k+1 even sections**, ports at the interior boundaries (fan-ordered so
+  // siblings never cross). A "straight" edge — one whose target is lined up with the
+  // node centre on this side, so it would leave perpendicular (axis ≈ 0) — keeps the
+  // CENTRE and the others spread evenly on each side of it; this is what keeps a
+  // layered trunk a dead-straight column (the spine edge is the straight one) without
+  // the router needing to know about the solver's trunk toggle. With no straight edge
+  // (or a single one), everyone just shares the even k+1 division.
+  const STRAIGHT = 4;                                  // |lean| under this ⇒ "straight out"
   const offAt = new Map();
   {
     const groups = new Map();
@@ -342,26 +348,27 @@ export function orthogonalGeometry(graph, bounds, prev) {
       const { hw, hh } = Nodes.half(n);
       const along = (side === "t" || side === "b") ? hw : hh;
       const axis  = (side === "t" || side === "b") ? other.x - n.x : other.y - n.y;
-      const lim = along * (nodes[ni].shape === "diamond" ? 0.5 : 0.7);
+      const lim = along * (n.shape === "diamond" ? 0.5 : 1);   // usable half-face (full for rect)
       const fan = fanKey(side, other.x - n.x, other.y - n.y);
       const gk = ni + ":" + side;
-      (groups.get(gk) || groups.set(gk, []).get(gk)).push({ key, want: clamp(axis, -lim, lim), along, fan });
+      (groups.get(gk) || groups.set(gk, []).get(gk)).push({ key, axis, lim, fan });
     };
     edges.forEach((e, ei) => {
       add(e.source, sides[ei][0], ei*2,   nodes[e.source], nodes[e.target]);
       add(e.target, sides[ei][1], ei*2+1, nodes[e.target], nodes[e.source]);
     });
     for (const arr of groups.values()) {
-      if (arr.length === 1) { offAt.set(arr[0].key, 0); continue; }
-      arr.sort((p, q) => p.fan - q.fan || p.want - q.want);   // fan order ⇒ no self-crossing
-      const pos = arr.map(r => r.want);
-      for (let i = 1; i < pos.length; i++) if (pos[i] < pos[i-1] + SEP) pos[i] = pos[i-1] + SEP;
-      for (let i = pos.length-2; i >= 0; i--) if (pos[i] > pos[i+1] - SEP) pos[i] = pos[i+1] - SEP;
-      const lim = arr[0].along * 0.82, span = pos[pos.length-1] - pos[0];
-      if (span > 2*lim) for (let i = 0; i < pos.length; i++) pos[i] = -lim + 2*lim*i/(pos.length-1);
-      else { const sh = pos[0] < -lim ? -lim - pos[0] : pos[pos.length-1] > lim ? lim - pos[pos.length-1] : 0;
-             for (let i = 0; i < pos.length; i++) pos[i] += sh; }
-      arr.forEach((r, i) => offAt.set(r.key, pos[i]));
+      const k = arr.length, lim = arr[0].lim;
+      if (k === 1) { offAt.set(arr[0].key, 0); continue; }
+      arr.sort((p, q) => p.fan - q.fan);                 // fan order ⇒ no self-crossing
+      const ti = arr.findIndex(r => Math.abs(r.axis) < STRAIGHT);   // the straight / trunk edge
+      if (ti >= 0) {
+        offAt.set(arr[ti].key, 0);                       // trunk pinned dead-centre
+        for (let i = 0; i < ti; i++)  offAt.set(arr[i].key, -lim * (ti - i) / (ti + 1));
+        for (let i = ti + 1; i < k; i++) offAt.set(arr[i].key, lim * (i - ti) / (k - ti));
+      } else {
+        for (let i = 0; i < k; i++) offAt.set(arr[i].key, -lim + 2*lim*(i + 1)/(k + 1));
+      }
     }
   }
 

@@ -465,6 +465,37 @@ describe("arrowHeading is robust near touching / overlapping nodes", () => {
   });
 });
 
+// Port distribution: k edges sharing a node side divide it into k+1 even sections
+// (ports at the interior boundaries), EXCEPT a "straight" edge (target lined up with
+// the node centre) keeps dead-centre so a layered trunk stays a straight column.
+describe("per-side port distribution (even k+1 sections, trunk centred)", () => {
+  const rect = (x, y, w, h = 36) => ({ x, y, w, h, shape: "rect" });
+  // ports (entry x) on the hub's TOP, given source x-positions above it
+  const topPorts = (hubW, srcXs) => {
+    const hub = rect(400, 520, hubW);
+    const nodes = [hub, ...srcXs.map(x => rect(x, 150, 46))].map((n, i) => ({ ...n, id: i }));
+    const edges = srcXs.map((_, k) => ({ source: k + 1, target: 0 }));
+    const g = orthogonalGeometry({ nodes, edges }, { x0: 60, y0: 60, x1: 760, y1: 640 });
+    return g.map(e => +e.poly[e.poly.length - 1].x.toFixed(1)).sort((a, b) => a - b);
+  };
+
+  it("two edges split the side into thirds", () => {
+    // wide hub (w=180 ⇒ top x∈[310,490]); sources off to each side, neither straight
+    expect(topPorts(180, [330, 470])).toEqual([370, 430]);
+  });
+
+  it("a straight (aligned) edge keeps the centre; siblings spread evenly around it", () => {
+    // middle source sits above the hub centre ⇒ that edge is the trunk ⇒ stays at 400
+    const ports = topPorts(180, [300, 400, 500]);
+    expect(ports[1]).toBeCloseTo(400, 1);              // trunk dead-centre
+    expect(ports).toEqual([355, 400, 445]);            // evenly spread
+  });
+
+  it("a single edge on a side stays centred", () => {
+    expect(topPorts(120, [400])).toEqual([400]);
+  });
+});
+
 describe("orthogonal routing invariants", () => {
   it("every edge connects on both node borders, axis-aligned", () => {
     const a = rect(180, 280), b = rect(540, 470);

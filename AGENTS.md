@@ -96,12 +96,17 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   Each result carries its chosen `sides` for testing. Invariant (test/router.test.js):
   sweeping a side-by-side box through a vertical range, the route **never exceeds 2
   bends** (a ≤2-bend route always exists when one axis has clearance; near-overlap on
-  BOTH axes is the only case that detours, and that's unavoidable). Ports also
-  **lean** toward the other
-  endpoint, then **de-collided per node-side** (`offAt` map): edges sharing a side are
-  spread to distinct slots (min SEP), single-edge sides stay centred, trunk children
-  sit at offset 0. Without this, dragging a node so two of its edges share a side made
-  them snap to the same point — one line skewering the box ("not connected").
+  BOTH axes is the only case that detours, and that's unavoidable).
+  **Per-side port distribution** (PHASE 2, `offAt` map): the `k` edges sharing a node
+  side **divide it into `k+1` even sections**, ports at the interior boundaries, ordered
+  by **fan angle** so siblings never cross (your "two lines → thirds" spec). A **straight**
+  edge — one whose target is lined up with the node centre on that side, so it leaves
+  perpendicular (`|axis| < STRAIGHT`) — keeps the **dead centre**, and the rest spread
+  evenly on each side of it. That's a single geometry-driven rule: when the layered
+  **trunk** toggle aligns the spine, the spine edge IS the straight one → it stays centred
+  → straight column preserved; with nothing aligned, it's pure even k+1. The router never
+  learns about the solver's toggle. (Replaced the old lean + min-SEP packing, which bunched
+  ports near centre instead of dividing the side.)
   The attach point's perpendicular coord is the **shape border** (`borderPerp`): rect =
   flat, **diamond = angled face** (tapers to the vertex), circle = round — so a leaning
   port on a decision diamond meets its slanted edge, not the bounding box. Constructive
@@ -187,7 +192,7 @@ approximates it physically; constructive solvers (layered/circular) target struc
   ports (no sibling crossings), A* seeded with the stub direction, grid-quantised length
   (no flicker), **hysteresis** (sticky + drag-steerable), and **channel separation**
   (`separateLanes` — co-running edges fanned into parallel tracks; verified in-browser on
-  K₆). All pinned by 34 Vitest tests
+  K₆). All pinned by 38 Vitest tests
   in `test/router.test.js` — the single best place to understand the routing contract.
   Run `npm test`. After ANY router change, also `npm run build` and check it stays a single
   file (`grep -c '<script src' dist/index.html` == 0).
@@ -225,7 +230,7 @@ edges, and angle-vs-chord tests never caught it. So:
   - **skip** (return null) when the edge is shorter than the glyph (`span(poly[0],poly[last]) <
     back`) — no tiny/overrunning arrows on near-touching nodes.
 The key test sweeps angle × distance × bulge and asserts the base is within 1px of the polyline
-(not just an angle). 34 router tests.
+(not just an angle). 38 router tests.
 
 The `layered` solver places a node in one layer per longest-path rank, but an edge that
 spans more than one layer is drawn as a single long line straight across the intervening
