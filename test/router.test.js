@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { orthogonalGeometry, bendCount, Nodes } from "../src/router.js";
+import { orthogonalGeometry, bendCount, Nodes, separateLanes } from "../src/router.js";
 
 // --- helpers ---------------------------------------------------------------
 const rect = (x, y, w = 98, h = 40) => ({ x, y, w, h, shape: "rect" });
@@ -179,6 +179,82 @@ describe("hysteresis — routing is sticky unless a strictly-better route appear
     let sides = route(a, b, prev)[0].sides;
     for (let i = 0; i < 5; i++) sides = route(a, b, [sides])[0].sides;  // iterate
     expect(sides).toEqual(["r", "l"]);                  // stable, never drifts
+  });
+});
+
+// NEXT TASK (now done): two edges whose A* paths run along the same grid lane
+// drew on top of each other — a collinear overlap segInt can't see (it returns
+// null for parallels), so the lines merged into one. separateLanes fans co-running
+// interior segments into parallel tracks. Mirror of the segInt helper, for the
+// parallel-coincident case it can't detect.
+describe("channel separation — co-running edges fan into parallel tracks", () => {
+  // do axis-aligned segments a1a2 and b1b2 lie in the same lane and overlap along
+  // it (collinear-coincident, by more than a touch)?
+  const coincident = (a1, a2, b1, b2) => {
+    const span = (p, q, k) => [Math.min(p[k], q[k]), Math.max(p[k], q[k])];
+    const overlap = (lo1, hi1, lo2, hi2) => Math.min(hi1, hi2) - Math.max(lo1, lo2) > 1.5;
+    const hA = Math.abs(a1.y - a2.y) < 1.5, hB = Math.abs(b1.y - b2.y) < 1.5;
+    const vA = Math.abs(a1.x - a2.x) < 1.5, vB = Math.abs(b1.x - b2.x) < 1.5;
+    if (hA && hB && Math.abs(a1.y - b1.y) < 1.5) {
+      const [a, c] = span(a1, a2, "x"), [d, e] = span(b1, b2, "x");
+      return overlap(a, c, d, e);
+    }
+    if (vA && vB && Math.abs(a1.x - b1.x) < 1.5) {
+      const [a, c] = span(a1, a2, "y"), [d, e] = span(b1, b2, "y");
+      return overlap(a, c, d, e);
+    }
+    return false;
+  };
+  // any two INTERIOR segments (the ones separation is allowed to move; the port
+  // stubs are de-collided separately in PHASE 2) from DIFFERENT edges coincident?
+  const anyCoincident = (geoms) => {
+    const segs = [];
+    geoms.forEach((g, gi) => { const p = g.poly;
+      for (let i = 1; i < p.length - 2; i++) segs.push({ gi, a: p[i], b: p[i + 1] }); });
+    for (let i = 0; i < segs.length; i++)
+      for (let j = i + 1; j < segs.length; j++)
+        if (segs[i].gi !== segs[j].gi && coincident(segs[i].a, segs[i].b, segs[j].a, segs[j].b))
+          return true;
+    return false;
+  };
+
+  it("separates two hand-built edges sharing one horizontal lane", () => {
+    const mk = poly => ({ poly });
+    const g = [
+      mk([{ x: 0,  y: 100 }, { x: 0,  y: 200 }, { x: 300, y: 200 }, { x: 300, y: 100 }]),
+      mk([{ x: 50, y: 120 }, { x: 50, y: 200 }, { x: 250, y: 200 }, { x: 250, y: 120 }]),
+    ];
+    const beforePorts = g.map(e => [e.poly[0], e.poly[e.poly.length - 1]]);
+    expect(anyCoincident(g)).toBe(true);     // they overlap along y=200 to start
+    separateLanes(g);
+    expect(anyCoincident(g)).toBe(false);    // ...and no longer do
+    // ports (border attach points) are pinned — separation must not move them
+    g.forEach((e, i) => {
+      expect(e.poly[0]).toEqual(beforePorts[i][0]);
+      expect(e.poly[e.poly.length - 1]).toEqual(beforePorts[i][1]);
+    });
+  });
+
+  it("a dense graph produces no collinear-coincident interior segments", () => {
+    // a 3×2 lattice of boxes fully connected left-column → right-column forces
+    // several edges to share horizontal corridors between the rows.
+    const rect = (x, y, w = 90, h = 38) => ({ x, y, w, h, shape: "rect" });
+    const L = [rect(160, 200), rect(160, 380), rect(160, 560)];
+    const Rr = [rect(620, 200), rect(620, 380), rect(620, 560)];
+    const nodes = [...L, ...Rr].map((n, i) => ({ ...n, id: i }));
+    const edges = [];
+    for (let s = 0; s < 3; s++) for (let t = 3; t < 6; t++) edges.push({ source: s, target: t });
+    const geoms = orthogonalGeometry({ nodes, edges }, { x0: 0, y0: 0, x1: 900, y1: 800 });
+    expect(anyCoincident(geoms)).toBe(false);
+  });
+
+  it("does not change bend counts (ports fixed ⇒ topology preserved)", () => {
+    const rect = (x, y, w = 90, h = 38) => ({ x, y, w, h, shape: "rect" });
+    const nodes = [rect(160, 200), rect(160, 400), rect(560, 200), rect(560, 400)]
+      .map((n, i) => ({ ...n, id: i }));
+    const edges = [{ source: 0, target: 2 }, { source: 1, target: 3 }, { source: 0, target: 3 }];
+    const geoms = orthogonalGeometry({ nodes, edges }, { x0: 0, y0: 0, x1: 900, y1: 700 });
+    geoms.forEach(g => expect(bendCount(g.poly)).toBeLessThanOrEqual(2));
   });
 });
 

@@ -78,6 +78,21 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   - Several edges leaving the SAME side are ordered by **fan angle to their targets**
     (`fanKey`), not just by their lean — so siblings don't cross each other as one is
     dragged across (the nearer target turns first, on the outer port).
+  - **Channel separation** (`separateLanes`, PHASE 4): A* routes each edge independently
+    over the shared `occ` grid, so two edges can land in the SAME lane and draw collinearly
+    on top of each other — `segInt` returns null for parallels, so it's not even a
+    "crossing"/hop, the lines just merge into one. Post-process fans co-running segments
+    into parallel tracks: it nudges only **interior** segments (both ends are bends), so the
+    PORT endpoints (pinned on the border) never move and the **bend count is unchanged**.
+    Horizontal interior segs shift in y, vertical in x — the shift moves only the two shared
+    bend vertices, the perpendicular neighbours grow/shrink, everything stays axis-aligned,
+    and a corner shared by an H and a V interior seg takes an independent y- and x-nudge.
+    Segments are grouped by lane (orientation + perp coord within `LANE_TOL`) then by
+    overlapping extent; each cluster is spread symmetrically by `LANE_STEP`, ordered by the
+    perpendicular centre of each seg's neighbours so the track arriving from "above" stays
+    above (minimises new crossings). Port stubs — the two end segments of any route, and so
+    every segment of a 0/1-bend route — are NOT separable this way; those are de-collided at
+    the ports back in PHASE 2.
   Each result carries its chosen `sides` for testing. Invariant (test/router.test.js):
   sweeping a side-by-side box through a vertical range, the route **never exceeds 2
   bends** (a ≤2-bend route always exists when one axis has clearance; near-overlap on
@@ -146,7 +161,9 @@ approximates it physically; constructive solvers (layered/circular) target struc
 - **Orthogonal routing is mature** (this is where most recent effort went): bend-minimised
   side choice on BOTH ends, 1-bend L / bottom-to-side, U-turns for tight wedges, fan-order
   ports (no sibling crossings), A* seeded with the stub direction, grid-quantised length
-  (no flicker), and **hysteresis** (sticky + drag-steerable). All pinned by 17 Vitest tests
+  (no flicker), **hysteresis** (sticky + drag-steerable), and **channel separation**
+  (`separateLanes` — co-running edges fanned into parallel tracks; verified in-browser on
+  K₆). All pinned by 20 Vitest tests
   in `test/router.test.js` — the single best place to understand the routing contract.
   Run `npm test`. After ANY router change, also `npm run build` and check it stays a single
   file (`grep -c '<script src' dist/index.html` == 0).
@@ -159,25 +176,33 @@ approximates it physically; constructive solvers (layered/circular) target struc
   may be **< 1**. `frame()` accumulates it (`state._accum`) and runs `floor` steps, so the
   low end animates genuinely slowly (down to 0.15 steps/frame).
 
-## NEXT TASK — channel separation (overlapping edges)
+## NEXT TASK — arrowheads on directed edges
 
-The routing of any single edge is solid now (see the long "side choice" list above and
-the 17 tests). The remaining defect: **two different edges whose A\* paths run along the
-same grid lane draw on top of each other** (collinear overlap — segInt returns null for
-parallels, so it isn't even a "crossing"/hop; the lines just merge into one). Visible on
-dense graphs (K₆ orthogonal) and wherever several edges share a corridor between rows.
+Channel separation is DONE (post-process `separateLanes`, PHASE 4; 3 new tests, 20 total).
+The flowchart still reads as undirected lines — there are no arrowheads. Add a directed
+glyph at the **target** end of each rendered polyline, pointing along the final segment's
+direction (the orthogonal routes already end axis-aligned, so the arrow is one of 4 cardinal
+directions; curved/straight need the tangent of the last sample). Draw it in the renderer
+(inline in `index.html`, NOT `router.js` — keep the router DOM-free). Make it toggleable
+(an "Arrowheads" switch alongside Crossing hops / Node labels) and on by default for the
+flowchart preset. Keep the arrow clear of the node border (it sits at `poly[last]`, already
+on the border) and don't let it overlap the crossing hops.
 
-Where: `src/router.js`, `orthogonalGeometry`. A* is independent per edge over a shared
-`occ` grid; nothing nudges co-running edges apart. Sketch of approaches (pick/learn):
-- Post-process: detect groups of edge segments sharing a lane (same row/col band) and
-  offset each by k·(a few px) perpendicular, fanning them into parallel tracks; re-stitch
-  the polylines. Cheapest, local, no A* change.
-- Or route edges sequentially, adding a soft cost to already-used cells (lane cost) so
-  later edges prefer empty lanes. Changes A* to be order-dependent (then add hysteresis).
-- Test it the same way we've tested everything: build a small graph with forced shared
-  lanes, assert no two edge segments are collinear-coincident (write a `coincident()`
-  helper mirroring the `segInt` one in the tests).
-Keep edges ≤2 bends where possible and don't regress the 17 existing tests.
+Watch-outs:
+- The arrow tip is `poly[last]`; back it off along the incoming segment by a few px so the
+  triangle doesn't bury into the box.
+- `separateLanes` may have nudged the last *interior* vertex, but the final port segment is
+  untouched, so the incoming direction is still the clean port-stub axis — use `poly[last]`
+  minus `poly[last-1]` for the heading.
+
+## Known limits / nice-to-haves for routing (lower priority)
+
+- Channel separation only fans **interior** segments. Two **port stubs** (or 0/1-bend
+  routes) that overlap are de-collided at the ports (PHASE 2 offsets), not by `separateLanes`
+  — in very dense fans this can still leave a short collinear stub. Could extend PHASE 2's
+  spread, or allow a tiny jog (but that costs a bend — weigh it).
+- `LANE_STEP`/`LANE_TOL` are fixed px; on extreme zoom they don't scale. Tie them to `cell`
+  if zoom is ever added.
 
 ## Other ideas (lower priority)
 

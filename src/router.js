@@ -303,13 +303,94 @@ export function orthogonalGeometry(graph, bounds, prev) {
   }
 
   // PHASE 3 — final geometry with offset ports.
-  return edges.map((e, ei) => {
+  const geoms = edges.map((e, ei) => {
     const a = nodes[e.source], b = nodes[e.target];
     const pa = makePort(a, sides[ei][0], offAt.get(ei*2) || 0);
     const pb = makePort(b, sides[ei][1], offAt.get(ei*2+1) || 0);
     const poly = routePorts(pa, pb) || elbow(pa, pb);
     return { poly, a, b, sides: sides[ei] };
   });
+
+  // PHASE 4 — channel separation. A* routes each edge independently over the
+  // shared occ grid, so two edges can land in the SAME lane and draw collinearly
+  // on top of each other — segInt returns null for parallels, so it isn't even a
+  // "crossing"/hop, the lines just merge into one. Fan such co-running segments
+  // into parallel tracks (see separateLanes).
+  separateLanes(geoms);
+  return geoms;
+}
+
+/* ---- channel separation -------------------------------------------------- */
+// Nudge edge segments that share a grid lane apart into parallel tracks. We only
+// touch INTERIOR segments — those whose BOTH endpoints are bends — so the port
+// endpoints (poly[0] / poly[last], pinned on the node border) never move and the
+// bend count is unchanged. A horizontal interior segment is shifted in y, a
+// vertical one in x; the shift moves only the two shared bend vertices, so the
+// perpendicular neighbour segments just grow/shrink and everything stays axis-
+// aligned. Shifts compose cleanly: a corner shared by a horizontal and a vertical
+// interior segment gets an independent y- and x-nudge.
+const LANE_TOL = 6;     // segments within this perpendicular gap count as one lane
+const LANE_STEP = 7;    // px between separated parallel tracks
+export function separateLanes(geoms) {
+  // interior segments: index i in [1 .. poly.length-3] (skip the two port stubs).
+  const H = [], V = [];   // {gi, pi, lane, lo, hi, key}
+  geoms.forEach((g, gi) => {
+    const p = g.poly;
+    for (let i = 1; i < p.length - 2; i++) {
+      const a = p[i], b = p[i+1];
+      const dx = Math.abs(a.x - b.x), dy = Math.abs(a.y - b.y);
+      if (dy < 1.5 && dx >= 1.5)        // horizontal: lane = y, ordered by neighbour y
+        H.push({ gi, pi: i, lane: a.y, lo: Math.min(a.x,b.x), hi: Math.max(a.x,b.x),
+                 key: p[i-1].y + p[i+2].y });
+      else if (dx < 1.5 && dy >= 1.5)   // vertical: lane = x, ordered by neighbour x
+        V.push({ gi, pi: i, lane: a.x, lo: Math.min(a.y,b.y), hi: Math.max(a.y,b.y),
+                 key: p[i-1].x + p[i+2].x });
+    }
+  });
+
+  // delta accumulator per (geom, point); ports never receive a delta.
+  const dpos = geoms.map(g => g.poly.map(() => ({ dx: 0, dy: 0 })));
+
+  // cluster segments of one orientation that share a lane AND overlap along it,
+  // then spread the cluster symmetrically. `axis` is "dy" (horizontal) or "dx".
+  const spread = (segs, axis) => {
+    segs.sort((s, t) => s.lane - t.lane || s.lo - t.lo);
+    let i = 0;
+    while (i < segs.length) {
+      // grow a lane band: contiguous segments within LANE_TOL of the band's lane
+      let j = i + 1;
+      while (j < segs.length && segs[j].lane - segs[i].lane < LANE_TOL) j++;
+      const band = segs.slice(i, j);
+      i = j;
+      // within the band, find overlapping-extent clusters (a sweep over [lo,hi])
+      band.sort((s, t) => s.lo - t.lo);
+      let k = 0;
+      while (k < band.length) {
+        let m = k + 1, reach = band[k].hi;
+        while (m < band.length && band[m].lo < reach - 0.5) { reach = Math.max(reach, band[m].hi); m++; }
+        const cluster = band.slice(k, m);
+        k = m;
+        if (cluster.length < 2) continue;
+        // order by the perpendicular centre of each segment's neighbours so the
+        // track that arrives from "above" stays above — minimises new crossings.
+        cluster.sort((s, t) => s.key - t.key || s.gi - t.gi);
+        const n = cluster.length;
+        cluster.forEach((s, idx) => {
+          const off = (idx - (n - 1) / 2) * LANE_STEP;
+          dpos[s.gi][s.pi][axis] += off;
+          dpos[s.gi][s.pi + 1][axis] += off;
+        });
+      }
+    }
+  };
+  spread(H, "dy");
+  spread(V, "dx");
+
+  geoms.forEach((g, gi) => {
+    const d = dpos[gi];
+    g.poly = g.poly.map((pt, i) => ({ x: pt.x + d[i].dx, y: pt.y + d[i].dy }));
+  });
+  return geoms;
 }
 
 /* ---- routing dispatch (straight | curved | orthogonal) ------------------- */
