@@ -739,26 +739,58 @@ function layeredTargets(graph, bounds) {
     for (let l = maxL-1; l >= 0; l--) order[l].sort((a, b) => bary(a, l+1, p) - bary(b, l+1, p));
   }
 
-  // 3. x-coordinate alignment — pull each node toward the mean of its neighbours,
-  //    then resolve overlaps within the layer keeping the chosen order. This is
-  //    what lines parents up over children so vertical edges come out straight.
-  let sep = 40;
-  for (const n of nodes) sep = Math.max(sep, Nodes.half(n).hw * 2 + 26);
+  // 3. x-coordinate alignment — the PRIORITY / MEDIAN method (à la Dagre). Each
+  //    node is pulled to the MEDIAN of its neighbours in one adjacent layer, and
+  //    higher-degree nodes win ties — so a node sits straight under its parent
+  //    instead of being averaged off-axis. This is what removes needless bends:
+  //    aligned parent↔child ports let the orthogonal router draw a single line.
+  let sep = 44;
+  for (const n of nodes) sep = Math.max(sep, Nodes.half(n).hw * 2 + 28);
   const x = new Array(N);
   order.forEach(arr => arr.forEach((id, idx) => x[id] = idx * sep));
-  for (let pass = 0; pass < 8; pass++) {
-    for (const arr of order) {
+
+  const median = vals => { vals.sort((p, q) => p - q); const m = vals.length >> 1;
+    return vals.length % 2 ? vals[m] : (vals[m-1] + vals[m]) / 2; };
+
+  // align every layer to its neighbours `dl` layers away (-1 = parents above)
+  function alignTo(dl) {
+    const seq = []; for (let l = 0; l <= maxL; l++) seq.push(l);
+    if (dl > 0) seq.reverse();
+    for (const l of seq) {
+      const arr = order[l]; if (arr.length < 1) continue;
+      const want = {}, prio = {};
       for (const id of arr) {
-        let s = 0, c = 0;
-        for (const v of adj[id]) { s += x[v]; c++; }
-        if (c) x[id] = s / c;
+        const nb = [];
+        for (const v of adj[id]) if (layer[v] === l + dl) nb.push(x[v]);
+        want[id] = nb.length ? median(nb) : x[id];
+        prio[id] = nb.length;
       }
-      for (let k = 1; k < arr.length; k++)             // left→right: enforce gap
-        if (x[arr[k]] < x[arr[k-1]] + sep) x[arr[k]] = x[arr[k-1]] + sep;
-      for (let k = arr.length-2; k >= 0; k--)          // right→left: pull back
-        if (x[arr[k]] > x[arr[k+1]] - sep) x[arr[k]] = x[arr[k+1]] - sep;
+      // place high-priority nodes first; they may shove lower-priority neighbours
+      const byPrio = arr.map((_, i) => i).sort((a, b) => prio[arr[b]] - prio[arr[a]]);
+      for (const i of byPrio) {
+        const id = arr[i]; let target = want[id];
+        if (target > x[id]) {                          // move right, up to next fixed peer
+          let limit = Infinity;
+          for (let j = i+1; j < arr.length; j++)
+            if (prio[arr[j]] >= prio[id]) { limit = x[arr[j]] - (j - i) * sep; break; }
+          target = Math.min(target, limit);
+          if (target > x[id]) { x[id] = target;
+            for (let j = i+1; j < arr.length; j++) {
+              if (x[arr[j]] < x[arr[j-1]] + sep) x[arr[j]] = x[arr[j-1]] + sep; else break; } }
+        } else if (target < x[id]) {                   // move left, up to next fixed peer
+          let limit = -Infinity;
+          for (let j = i-1; j >= 0; j--)
+            if (prio[arr[j]] >= prio[id]) { limit = x[arr[j]] + (i - j) * sep; break; }
+          target = Math.max(target, limit);
+          if (target < x[id]) { x[id] = target;
+            for (let j = i-1; j >= 0; j--) {
+              if (x[arr[j]] > x[arr[j+1]] - sep) x[arr[j]] = x[arr[j+1]] - sep; else break; } }
+        }
+      }
     }
   }
+  for (let pass = 0; pass < 4; pass++) { alignTo(-1); alignTo(+1); }
+  alignTo(-1);                                          // finish top-down for tidy chains
 
   // 4. coordinate assignment — layer → y; aligned x mapped/scaled into bounds
   const W = bounds.x1 - bounds.x0, H = bounds.y1 - bounds.y0;
@@ -988,7 +1020,7 @@ class MinHeap {
     return top; }
 }
 
-const ORTHO = { cell: 15, margin: 11, turn: 4 };
+const ORTHO = { cell: 15, margin: 11, turn: 8 };
 
 function orthogonalGeometry(graph, bounds) {
   const { nodes, edges } = graph, C = ORTHO;

@@ -55,9 +55,10 @@ attack it.
   (crossings + edge length + overlap + border). The headline metaheuristic.
 - `hillclimb` — same neighborhood as SA but greedy (T=0). Shows local-minima trapping.
 - `layered` — Sugiyama-lite: **longest-path layering along edge direction** (sources on
-  top) + barycentre crossing reduction + **x-coordinate alignment** (pull to neighbour
-  mean, resolve overlaps) so columns line up and edges run straight. The Dagre/ELK
-  analogue. Pair with orthogonal routing for the flowchart.
+  top) + barycentre crossing reduction + **priority/median x-alignment** (each node →
+  median of its neighbours, higher-degree wins ties; `alignTo(±1)` sweeps) so chains sit
+  in one column and the orthogonal router draws them as a single straight line — far
+  fewer bends. The Dagre/ELK analogue. Pair with orthogonal routing for the flowchart.
 - `circular` — nodes on a ring; baseline + reorder. Cheap contrast.
 
 ## Routing & the flowchart example
