@@ -61,6 +61,22 @@ approximates it physically; constructive solvers (layered/circular) target struc
 - Keep solver code readable and commented — this is *educational*; clarity beats cleverness.
 - Commit messages: imperative, scoped (`feat:`, `chore:`, `docs:`, `fix:`).
 
+## Status (keep honest)
+
+- DONE: facade + iterative `step()`/`done` seam; Canvas dark renderer w/ dot-grid;
+  quadratic-bezier curved edges; crossing hops (snap to nearest curve vertex);
+  shared `Objective` (crossings + length-deviation + overlap); all five solvers
+  (`force`, `annealing`, `hillclimb`, `layered`, `circular`); tunable cost-weight
+  + cooling sliders; per-solver explainer; node dragging; keyboard (space/S/R);
+  7 presets. Verified in-browser (Claude Preview), no console errors.
+- Crossings are chord-based (the straight-line crossing number); edges are *drawn*
+  curved. Hops snap to the nearest curve vertex, so the count and the visuals agree.
+- The length term penalises |len − k| (deviation from ideal), NOT raw length —
+  raw length made SA collapse the graph to a point. Do not regress this.
+
 ## TODO / ideas not yet done
 
-(keep this list honest as we go)
+- Real ELK backend behind the facade (would validate the seam).
+- Sugiyama: dummy nodes for long edges + true Brandes–Köpf x-coordinates.
+- Best-cost-so-far tracking / a convergence sparkline.
+- A/B split view to race two solvers on the same graph.

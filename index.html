@@ -191,6 +191,7 @@
         <select id="sel-graph" title="Graph">
         </select>
       </div>
+      <p class="note" id="solver-note" style="margin-top:11px"></p>
     </div>
 
     <div class="group">
@@ -261,6 +262,7 @@
         Production stacks (Dagre, ELK) hide layout behind a <b>facade</b>. Uncharted keeps
         that seam but exposes each solver iteratively so you can <b>watch</b> it work.
         Drag any node to perturb the system. Crossings are drawn as little <b>hops</b>.
+        <br><br>Keys — <b>space</b> play/pause · <b>S</b> step · <b>R</b> reshuffle.
       </p>
     </div>
   </aside>
@@ -1031,6 +1033,15 @@ const App = (() => {
     bindSlider("rng-woverlap","val-woverlap",v => state.params.weights.overlap = v, 1);
 
     window.addEventListener("resize", () => { resize(); });
+
+    // keyboard: space = play/pause, S = single step, R = reshuffle
+    window.addEventListener("keydown", e => {
+      if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
+      if (e.code === "Space") { e.preventDefault(); setRunning(!state.running); }
+      else if (e.key === "s" || e.key === "S") { if (state.solver && !state.solver.done) state.solver.step(); }
+      else if (e.key === "r" || e.key === "R") { loadGraph(state.presetName, true); }
+    });
+
     updateSolverUI();
   }
 
@@ -1040,12 +1051,30 @@ const App = (() => {
     r.addEventListener("input", apply); apply();
   }
 
-  // Show only the parameters relevant to the active solver.
+  const SOLVER_NOTES = {
+    force: "Edges pull like springs, every pair of nodes repels, and the system " +
+           "cools into a low-energy equilibrium. Not crossing-aware — but low " +
+           "energy usually means a clean picture.",
+    annealing: "Nudges a random node each step. Downhill moves are always taken; " +
+           "uphill moves are accepted with probability e^(−ΔC/T), so early heat " +
+           "lets it escape local minima before it freezes.",
+    hillclimb: "The same nudges as annealing, but it only ever accepts an " +
+           "improvement. Fast — and a vivid demonstration of getting trapped in a " +
+           "local minimum. Re-solve to see different traps.",
+    layered: "Sugiyama in three phases: assign layers by BFS depth, reorder within " +
+           "each layer by neighbour barycentre to cut crossings, then place. This " +
+           "is the Dagre / ELK family.",
+    circular: "Nodes on a ring in BFS order — a cheap baseline. Compare its " +
+           "crossing count against the optimisers on the same graph.",
+  };
+
+  // Show only the parameters relevant to the active solver + its explainer.
   function updateSolverUI() {
     const s = state.solverName;
     const isMeta = s === "annealing" || s === "hillclimb";
     document.getElementById("params-force").style.display = s === "force" ? "" : "none";
     document.getElementById("params-meta").style.display  = isMeta ? "" : "none";
+    document.getElementById("solver-note").textContent = SOLVER_NOTES[s] || "";
   }
 
   function init() {
