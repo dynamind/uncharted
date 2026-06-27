@@ -175,7 +175,7 @@ approximates it physically; constructive solvers (layered/circular) target struc
   ports (no sibling crossings), A* seeded with the stub direction, grid-quantised length
   (no flicker), **hysteresis** (sticky + drag-steerable), and **channel separation**
   (`separateLanes` — co-running edges fanned into parallel tracks; verified in-browser on
-  K₆). All pinned by 32 Vitest tests
+  K₆). All pinned by 34 Vitest tests
   in `test/router.test.js` — the single best place to understand the routing contract.
   Run `npm test`. After ANY router change, also `npm run build` and check it stays a single
   file (`grep -c '<script src' dist/index.html` == 0).
@@ -196,24 +196,24 @@ approximates it physically; constructive solvers (layered/circular) target struc
 
 Recent work is all DONE: channel separation (`separateLanes`, PHASE 4), edge-through-node
 counts as a crossing (`segHitsBody`/`nodePierces`), and **arrowheads** (filled triangle at the
-target; toggle `tg-arrows`, auto-on for the flowchart). The **heading** is a pure function
-`arrowHeading(poly, source, target, mode)` in `router.js` (renderer `drawArrowhead` just fills
-the triangle + shrinks it proportionally when `room` is tight). The TIP is always `poly[last]`
-(on the border, glued to the drawn line). The HEADING:
-  - **curved / straight → a SECANT over the last `back` (=11px) of arc length**, so the arrow
-    *continues the line* (the curve's end-tangent is ~10° off the chord; the raw chord makes
-    long edges look wrong — that was a regression we fixed). The naive last sample is unusable
-    (a ~1px tail → `atan2` jitters/"rotates around the endpoint"; the clipped tail can point
-    backward), so trust the secant only when **inward AND within ~35° of the chord**; on a very
-    short / strongly-bulged edge (secant wraps the bulge) fall back to the stable chord. Straight
-    routing has a 2-pt polyline so its secant == chord.
-  - **orthogonal → the axis-aligned final segment** (`poly[last]−poly[last-1]`; a chord would
-    draw a diagonal arrow on an L-route). The port stub is always outside the body and
-    axis-aligned, so no walk-back/`inBody` needed — and we never walk past a near-target corner.
-`arrowHeading` returns `room` = the straight **span between the rendered endpoints** (NOT the
-arc length — a bulging curve between near-touching nodes has a long arc but a tiny chord);
-the renderer **skips the arrow entirely when `room < ARROW_LEN`** (edge shorter than the glyph
-— no tiny/overrunning arrows on near-touching nodes), else draws it full size. 32 router tests.
+target; toggle `tg-arrows`, auto-on for the flowchart). `arrowHeading(poly, source, target, mode,
+back)` in `router.js` returns the tip AND base of the glyph; `drawArrowhead` just fills the
+triangle. **Defining requirement (learned the hard way over several iterations): BOTH the tip
+and the base must lie ON the drawn line** — otherwise the wide end drifts off the curve. Every
+"derive a direction, then step `back` px along *that*" approach failed this on short/dragged
+edges, and angle-vs-chord tests never caught it. So:
+  - **curved / straight →** TIP = `poly[last]` (on the border); BASE = where the polyline first
+    crosses a circle of radius `back` (=ARROW_LEN=11) around the tip, scanning outward. The base
+    is a point on the line by construction, exactly `back` from the tip, on the outside — so the
+    heading is the line's own direction and always points inward, and the arrow is literally the
+    head of the curve. (This is the user's original "intersect the endpoint at radius n with the
+    line" idea.)
+  - **orthogonal →** step `back` along the axis-aligned final segment (`poly[last]−poly[last-1]`);
+    a line-point would round the corner and tilt the arrow off-axis.
+  - **skip** (return null) when the edge is shorter than the glyph (`span(poly[0],poly[last]) <
+    back`) — no tiny/overrunning arrows on near-touching nodes.
+The key test sweeps angle × distance × bulge and asserts the base is within 1px of the polyline
+(not just an angle). 34 router tests.
 
 The `layered` solver places a node in one layer per longest-path rank, but an edge that
 spans more than one layer is drawn as a single long line straight across the intervening

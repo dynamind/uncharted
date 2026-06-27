@@ -306,11 +306,11 @@ describe("Nodes.inBody — point-in-shape", () => {
   });
 });
 
-// arrowHeading must (1) always point INTO the target — never flip backward over
-// the node, even as nodes are dragged into contact/overlap — and (2) stay stable
-// (no jitter from a ~1px baseline). It bottomed out as two bugs: a short curved
-// edge whose bezier tail dips inside the target, and a near-1px baseline whose
-// atan2 spins. Sweep all three routings down through touching/overlapping.
+// arrowHeading puts the tip on the border and the base where the line crosses
+// radius `back` from the tip — so BOTH ends sit ON the drawn line. It must: point
+// inward, keep the base on the line (the bug that survived every angle test — the
+// wide end drifting off the curve on short/dragged edges), follow the curve, stay
+// axis-aligned for orthogonal, and skip when the edge is shorter than the glyph.
 describe("arrowHeading is robust near touching / overlapping nodes", () => {
   const headAt = (mode, gap) => {
     const rectish = mode === "orthogonal";
@@ -370,20 +370,53 @@ describe("arrowHeading is robust near touching / overlapping nodes", () => {
     expect(Math.min(Math.abs(h.ux), Math.abs(h.uy))).toBeLessThan(0.02);   // one axis ~0
   });
 
-  // `room` is the rendered edge length; the renderer skips the glyph when it's
-  // shorter than the arrow (ARROW_LEN=11), so the arrow never overruns a short edge.
-  it("reports room so the renderer can skip arrows on edges shorter than the glyph", () => {
-    const room = (mode, centreGap) => {
+  // THE requirement that the angle tests missed: the arrow's wide end (the base)
+  // must sit ON the drawn line, never drift off it — even on the short, bulged edges
+  // you only get by dragging connected nodes close. Sweep angle × distance × bulge
+  // and assert the base is within 1px of some polyline segment (and `back` from tip).
+  it("the arrow base sits on the drawn line at every angle/length/bulge", () => {
+    const ARROW_LEN = 11;
+    const distToPolyline = (p, poly) => {
+      let best = Infinity;
+      for (let i = 1; i < poly.length; i++) {
+        const a = poly[i-1], b = poly[i];
+        const dx = b.x-a.x, dy = b.y-a.y, L2 = dx*dx + dy*dy || 1;
+        let t = ((p.x-a.x)*dx + (p.y-a.y)*dy) / L2; t = t < 0 ? 0 : t > 1 ? 1 : t;
+        best = Math.min(best, Math.hypot(p.x - (a.x+dx*t), p.y - (a.y+dy*t)));
+      }
+      return best;
+    };
+    const offenders = [];
+    for (const dist of [22, 30, 45, 70, 120, 220]) {
+      for (let deg = 0; deg < 360; deg += 15) {
+        for (const i of [0, 1]) {
+          const r = deg * Math.PI / 180;
+          const a = { x: 400, y: 400, id: 0 };
+          const b = { x: 400 + dist*Math.cos(r), y: 400 + dist*Math.sin(r), id: 1 };
+          const edges = i === 0 ? [{ source: 0, target: 1 }]
+                                : [{ source: 0, target: 1 }, { source: 0, target: 1 }];
+          const g = edgeGeometry({ nodes: [a, b], edges }, "curved", { x0: 0, y0: 0, x1: 800, y1: 800 })[i];
+          const h = arrowHeading(g.poly, a, b, "curved", ARROW_LEN);
+          if (!h) continue;
+          const baseOnLine = distToPolyline({ x: h.bx, y: h.by }, g.poly);
+          const baseToTip = Math.hypot(h.tx - h.bx, h.ty - h.by);
+          if (baseOnLine > 1 || Math.abs(baseToTip - ARROW_LEN) > 0.5)
+            offenders.push({ dist, deg, i, baseOnLine: +baseOnLine.toFixed(2), baseToTip: +baseToTip.toFixed(1) });
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it("skips the glyph when the edge is shorter than the arrow", () => {
+    const drawn = (mode, centreGap) => {
       const n = [{ x: 200, y: 200, id: 0 }, { x: 200 + centreGap, y: 200, id: 1 }];   // circles, R=8
       const poly = edgeGeometry({ nodes: n, edges: [{ source: 0, target: 1 }] }, mode,
         { x0: 0, y0: 0, x1: 600, y1: 600 })[0].poly;
-      return arrowHeading(poly, n[0], n[1], mode)?.room ?? 0;
+      return arrowHeading(poly, n[0], n[1], mode, 11) !== null;
     };
-    expect(room("straight", 40)).toBeGreaterThanOrEqual(11);   // border-to-border 24px → drawn
-    expect(room("straight", 20)).toBeLessThan(11);             // border-to-border 4px → skipped
-    // curved: room is the endpoint SPAN, not the (bulging) arc length — so a curve
-    // between near-touching nodes still reads as short and gets skipped.
-    expect(room("curved", 26)).toBeLessThan(11);               // chord ~10px though arc ~36px
+    expect(drawn("straight", 40)).toBe(true);    // border-to-border 24px → drawn
+    expect(drawn("straight", 20)).toBe(false);   // border-to-border 4px → skipped
   });
 
   // THE test that actually matters: across a full sweep of angles, distances and

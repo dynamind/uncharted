@@ -436,56 +436,55 @@ export function separateLanes(geoms) {
   return geoms;
 }
 
-/* ---- arrowhead heading --------------------------------------------------- */
-// Direction for a directed arrowhead at the TARGET end of a rendered polyline.
-// Returns { tx, ty (tip on the border, kept glued to the line end), ux, uy (unit
-// heading INTO the target), room (the straight SPAN between the rendered endpoints
-// — the visible "edge length", NOT the arc length, so a bulging curve between two
-// near-touching nodes correctly reads as short) } — or null when there's no room.
+/* ---- arrowhead geometry -------------------------------------------------- */
+// Tip + base for a directed arrowhead at the TARGET end of a rendered polyline.
+// Returns { tx, ty (tip, on the border), bx, by (base centre), ux, uy (unit heading
+// tip←base) } — or null when the edge is shorter than the glyph (skip it).
 //
-// The TIP is always poly[last] (on the border, on the drawn line). The HEADING:
-//   • orthogonal → the axis-aligned final segment (poly[last]−poly[last-1]); its port
-//     stub is always outside the body and axis-aligned, so the arrow lines up with the
-//     incoming run. (A chord would draw a diagonal arrow on an L-route.)
-//   • curved / straight → follow the curve via a SECANT over the last `back` px of arc
-//     length, so the arrow *continues the line* (the curve's end-tangent is ~10° off the
-//     chord; using the raw chord makes longer edges look wrong). The naive last sample is
-//     no good — it jitters (a ~1px tail → atan2 spins) and the clipped tail can point
-//     backward — so trust the secant only when it's reliable: pointing inward AND within
-//     ~35° of the chord. On a very short / strongly-bulged edge (where the secant wraps
-//     the bulge) fall back to the stable chord.
+// The defining requirement: BOTH the tip and the base must lie ON the drawn line,
+// so the triangle's wide end can never drift off the curve (the failure you get
+// when you derive a direction and then step `back` px along *that* instead of along
+// the line — on a bulged/dragged short edge the two diverge and the base floats off).
+//   • curved / straight → the base is where the polyline first crosses a circle of
+//     radius `back` around the tip, scanning outward from the tip. That point is on
+//     the line by construction, exactly `back` px from the tip, on the outside — so
+//     the heading is the line's own direction at the tip and always points inward.
+//   • orthogonal → step `back` along the axis-aligned final segment instead (a line
+//     point would round the corner and tilt the arrow off-axis).
 export function arrowHeading(poly, source, target, mode, back = 11) {
   const tip = poly[poly.length - 1], first = poly[0];
-  const room = Math.hypot(tip.x - first.x, tip.y - first.y);   // endpoint span, not arc length
-  if (room < 5) return null;
-  let ux = 0, uy = 0;
+  if (Math.hypot(tip.x - first.x, tip.y - first.y) < back) return null;   // edge shorter than glyph
+  let bx, by;
   if (mode === "orthogonal") {
     const prev = poly[poly.length - 2];
     const dx = tip.x - prev.x, dy = tip.y - prev.y, L = Math.hypot(dx, dy);
-    if (L > 1e-3) { ux = dx/L; uy = dy/L; }              // axis stub → already inward
-  } else {
-    // secant base: walk back `back` px of arc length from the tip
-    let acc = 0, px = tip.x, py = tip.y, rx = first.x, ry = first.y;
-    for (let i = poly.length - 2; i >= 0; i--) {
-      const q = poly[i], seg = Math.hypot(px - q.x, py - q.y);
-      if (acc + seg >= back) { const t = (back - acc) / seg; rx = px - (px - q.x)*t; ry = py - (py - q.y)*t; break; }
-      acc += seg; px = q.x; py = q.y; rx = q.x; ry = q.y;
-    }
-    const dx = tip.x - rx, dy = tip.y - ry, L = Math.hypot(dx, dy);
-    const cdx = target.x - source.x, cdy = target.y - source.y, cL = Math.hypot(cdx, cdy);
-    if (L > 1e-3 && cL > 1e-3) {
-      const sx = dx/L, sy = dy/L;
-      const inward = sx*(target.x - tip.x) + sy*(target.y - tip.y) > 0;
-      const aligned = (sx*cdx + sy*cdy) / cL > 0.82;     // within ~35° of the chord
-      if (inward && aligned) { ux = sx; uy = sy; }
-    }
-  }
-  if (ux === 0 && uy === 0) {                            // chord fallback (always inward)
-    const dx = target.x - source.x, dy = target.y - source.y, L = Math.hypot(dx, dy);
     if (L < 1e-3) return null;
-    ux = dx/L; uy = dy/L;
+    bx = tip.x - dx/L*back; by = tip.y - dy/L*back;
+  } else {
+    // first point at distance `back` from the tip, walking out along the polyline
+    let base = null;
+    for (let i = poly.length - 2; i >= 0; i--) {
+      const near = poly[i + 1], far = poly[i];
+      const dNear = Math.hypot(near.x - tip.x, near.y - tip.y);
+      const dFar  = Math.hypot(far.x  - tip.x, far.y  - tip.y);
+      if (dNear <= back && dFar >= back) {                 // segment crosses the radius-`back` circle
+        const ex = far.x - near.x, ey = far.y - near.y;
+        const fx = near.x - tip.x, fy = near.y - tip.y;
+        const A = ex*ex + ey*ey, B = 2*(ex*fx + ey*fy), C = fx*fx + fy*fy - back*back;
+        const disc = B*B - 4*A*C;
+        if (disc >= 0 && A > 1e-9) {
+          const t = (-B + Math.sqrt(disc)) / (2*A);        // outward crossing
+          base = { x: near.x + ex*t, y: near.y + ey*t };
+          break;
+        }
+      }
+    }
+    if (!base) return null;
+    bx = base.x; by = base.y;
   }
-  return { tx: tip.x, ty: tip.y, ux, uy, room };
+  const dx = tip.x - bx, dy = tip.y - by, L = Math.hypot(dx, dy);
+  if (L < 1e-3) return null;
+  return { tx: tip.x, ty: tip.y, bx, by, ux: dx/L, uy: dy/L };
 }
 
 /* ---- routing dispatch (straight | curved | orthogonal) ------------------- */
