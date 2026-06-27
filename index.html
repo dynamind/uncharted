@@ -173,6 +173,7 @@
       <div class="chip">iter <b id="hud-iter">0</b></div>
       <div class="chip cross">crossings <b id="hud-cross">–</b></div>
       <div class="chip cost">cost <b id="hud-cost">–</b></div>
+      <div class="chip">temp <b id="hud-temp">–</b></div>
     </div>
   </div>
 
@@ -182,6 +183,8 @@
       <div class="seg">
         <select id="sel-solver" title="Solver backend">
           <option value="force">Force-directed · Fruchterman–Reingold</option>
+          <option value="annealing">Simulated annealing · Davidson–Harel</option>
+          <option value="hillclimb">Hill climbing · greedy local search</option>
         </select>
         <select id="sel-graph" title="Graph">
         </select>
@@ -200,6 +203,36 @@
         <label>Speed</label>
         <input id="rng-speed" type="range" min="1" max="40" value="6" />
         <div class="val" id="val-speed">6</div>
+      </div>
+    </div>
+
+    <div class="group" id="params-force">
+      <div class="label">Force parameters</div>
+      <div class="params">
+        <div class="row"><label>Spacing</label>
+          <input id="rng-spacing" type="range" min="0.3" max="1.2" step="0.02" value="0.62" />
+          <div class="val" id="val-spacing">0.62</div></div>
+        <div class="row"><label>Gravity</label>
+          <input id="rng-gravity" type="range" min="0" max="0.12" step="0.005" value="0.03" />
+          <div class="val" id="val-gravity">0.03</div></div>
+      </div>
+    </div>
+
+    <div class="group" id="params-meta">
+      <div class="label">Cost weights &amp; annealing</div>
+      <div class="params">
+        <div class="row"><label>Crossings</label>
+          <input id="rng-wcross" type="range" min="0" max="2.5" step="0.05" value="1" />
+          <div class="val" id="val-wcross">1.0</div></div>
+        <div class="row"><label>Edge length</label>
+          <input id="rng-wlen" type="range" min="0" max="2.5" step="0.05" value="1" />
+          <div class="val" id="val-wlen">1.0</div></div>
+        <div class="row"><label>Overlap</label>
+          <input id="rng-woverlap" type="range" min="0" max="2.5" step="0.05" value="1" />
+          <div class="val" id="val-woverlap">1.0</div></div>
+        <div class="row"><label>Cooling</label>
+          <input id="rng-cooling" type="range" min="0.90" max="0.995" step="0.005" value="0.97" />
+          <div class="val" id="val-cooling">0.97</div></div>
       </div>
     </div>
 
@@ -373,6 +406,72 @@ function seedPositions(graph, bounds) {
 }
 
 /* ---------------------------------------------------------------------------
+   2b. Objective — the combinatorial cost the solvers fight against.
+   Everything (the live metric, the hops, and the metaheuristics) reads
+   crossings from here, so the number on screen is the number being optimised.
+   Crossings use straight chords between node centres — the classic
+   straight-line crossing number — while edges are merely *drawn* curved.
+   ------------------------------------------------------------------------- */
+const Objective = {
+  minDist: 34,                       // nodes closer than this "overlap"
+  idealK(graph, bounds) {
+    const W = bounds.x1 - bounds.x0, H = bounds.y1 - bounds.y0;
+    return Math.sqrt((W*H) / Math.max(1, graph.nodes.length)) * 0.6;
+  },
+  // all pairwise edge crossings (non-adjacent edges) with intersection points
+  crossings(graph) {
+    const { nodes, edges } = graph, out = [];
+    for (let i = 0; i < edges.length; i++) {
+      const e = edges[i], a = nodes[e.source], b = nodes[e.target];
+      for (let j = i+1; j < edges.length; j++) {
+        const f = edges[j];
+        if (e.source===f.source || e.source===f.target ||
+            e.target===f.source || e.target===f.target) continue;
+        const c = nodes[f.source], d = nodes[f.target];
+        const hit = Geo.segInt(a.x,a.y,b.x,b.y, c.x,c.y,d.x,d.y);
+        if (hit) out.push({ x: hit.x, y: hit.y, eA: i, eB: j });
+      }
+    }
+    return out;
+  },
+  totalLength(graph) {
+    let s = 0;
+    for (const e of graph.edges) {
+      const a = graph.nodes[e.source], b = graph.nodes[e.target];
+      s += Geo.dist(a.x, a.y, b.x, b.y);
+    }
+    return s;
+  },
+  // Penalise *deviation* from the ideal length k, not raw length — otherwise the
+  // optimiser just collapses the whole graph toward a point.
+  lengthPenalty(graph, k) {
+    let p = 0;
+    for (const e of graph.edges) {
+      const a = graph.nodes[e.source], b = graph.nodes[e.target];
+      p += Math.abs(Geo.dist(a.x, a.y, b.x, b.y) - k) / k;
+    }
+    return p;
+  },
+  overlap(graph) {
+    const { nodes } = graph; let p = 0;
+    for (let i = 0; i < nodes.length; i++)
+      for (let j = i+1; j < nodes.length; j++) {
+        const d = Geo.dist(nodes[i].x, nodes[i].y, nodes[j].x, nodes[j].y);
+        if (d < this.minDist) p += (this.minDist - d);
+      }
+    return p;
+  },
+  // weighted total — what SA/hillclimb minimise and what the HUD shows
+  full(graph, bounds, w) {
+    const k = this.idealK(graph, bounds);
+    const cr = this.crossings(graph).length;
+    const lenPen = this.lengthPenalty(graph, k);
+    const ov = this.overlap(graph);
+    return w.cross*cr*10 + w.len*lenPen + w.overlap*(ov/this.minDist);
+  },
+};
+
+/* ---------------------------------------------------------------------------
    3. LayoutEngine facade + solvers
    A solver instance exposes: step() -> advance one iteration (mutates nodes),
    and a `done` flag. This iterative seam is what makes solving *visible*; a
@@ -454,6 +553,78 @@ LayoutEngine.register("force", (graph, bounds, params) => {
   };
 });
 
+/* --- Metaheuristics: Simulated Annealing (Davidson–Harel) & Hill Climbing ---
+   Both explore the same neighbourhood — nudge one node by a cooling radius —
+   but annealing sometimes accepts a worse layout (prob e^(-ΔC/T)) to escape
+   local minima, while hill climbing never does. Run them on the same graph to
+   watch greed get stuck. We evaluate ΔC *locally* (only edges/nodes touching
+   the moved node) so thousands of proposals stay cheap. --- */
+function makeAnnealer(greedy) {
+  return (graph, bounds, params) => {
+    const { nodes, edges } = graph;
+    const W = bounds.x1 - bounds.x0, H = bounds.y1 - bounds.y0;
+    const k = Objective.idealK(graph, bounds);
+    const md = Objective.minDist;
+    const adj = nodes.map(() => []);
+    edges.forEach((e, i) => { adj[e.source].push(i); adj[e.target].push(i); });
+
+    let T = Math.min(W, H) * 0.5;          // drives both move radius & acceptance
+    const Tmin = 0.6;
+    let iter = 0;
+
+    // cost of just the parts that change when node i moves
+    function localCost(i) {
+      const w = params.weights;
+      let cr = 0, lenPen = 0, ov = 0;
+      const n = nodes[i];
+      for (const ei of adj[i]) {
+        const e = edges[ei], a = nodes[e.source], b = nodes[e.target];
+        lenPen += Math.abs(Geo.dist(a.x, a.y, b.x, b.y) - k) / k;
+        for (let fj = 0; fj < edges.length; fj++) {
+          if (fj === ei) continue;
+          const f = edges[fj];
+          if (e.source===f.source || e.source===f.target ||
+              e.target===f.source || e.target===f.target) continue;
+          const c = nodes[f.source], d = nodes[f.target];
+          if (Geo.segInt(a.x,a.y,b.x,b.y, c.x,c.y,d.x,d.y)) cr++;
+        }
+      }
+      for (let j = 0; j < nodes.length; j++) {
+        if (j === i) continue;
+        const d = Geo.dist(n.x, n.y, nodes[j].x, nodes[j].y);
+        if (d < md) ov += (md - d);
+      }
+      return w.cross*cr*10 + w.len*lenPen + w.overlap*(ov/md);
+    }
+
+    return {
+      name: greedy ? "hillclimb" : "annealing",
+      get done() { return T < Tmin; },
+      get iter() { return iter; },
+      get temp() { return T; },
+      step() {
+        iter++;
+        const radius = T;
+        for (let s = 0; s < nodes.length; s++) {
+          const i = (Math.random() * nodes.length) | 0;
+          const n = nodes[i];
+          if (n.fixed) continue;
+          const before = localCost(i);
+          const ox = n.x, oy = n.y;
+          n.x = Geo.clamp(ox + (Math.random()*2-1)*radius, bounds.x0, bounds.x1);
+          n.y = Geo.clamp(oy + (Math.random()*2-1)*radius, bounds.y0, bounds.y1);
+          const dC = localCost(i) - before;
+          const accept = greedy ? (dC < 0) : (dC <= 0 || Math.random() < Math.exp(-dC / T));
+          if (!accept) { n.x = ox; n.y = oy; }
+        }
+        T *= (params.cooling ?? 0.97);     // geometric cooling
+      },
+    };
+  };
+}
+LayoutEngine.register("annealing", makeAnnealer(false));
+LayoutEngine.register("hillclimb", makeAnnealer(true));
+
 /* ---------------------------------------------------------------------------
    4. Renderer
    ------------------------------------------------------------------------- */
@@ -472,7 +643,7 @@ const Renderer = (() => {
       const mx = (p0.x+p1.x)/2, my = (p0.y+p1.y)/2;
       const dx = p1.x-p0.x, dy = p1.y-p0.y;
       const len = Math.hypot(dx, dy) || 1;
-      const off = Math.min(46, len*0.13) * ((i % 2) ? 1 : -1);
+      const off = Math.min(34, len*0.11) * ((i % 2) ? 1 : -1);
       const c = { x: mx - dy/len*off, y: my + dx/len*off };
       return { poly: Geo.sampleQuad(p0, c, p1, SAMPLES), a, b, c };
     });
@@ -531,32 +702,41 @@ const Renderer = (() => {
     ctx.stroke();
   }
 
-  // Walk the polyline; near each hop point, lift into a small arc (a bridge).
+  // Draw the curve, lifting into a small semicircular bridge at each crossing.
+  // Crossings live on the straight chords, so we snap every hop to the nearest
+  // vertex of this (possibly curved) polyline — the bump always lands on the line.
   function drawPolyWithHops(ctx, poly, hops) {
+    // assign each hop to its closest interior segment, then sort along the line
+    const bumps = [];
+    for (const h of hops) {
+      let best = 1, bd = Infinity;
+      for (let i = 1; i < poly.length - 1; i++) {
+        const d = Geo.dist(h.x, h.y, poly[i].x, poly[i].y);
+        if (d < bd) { bd = d; best = i; }
+      }
+      bumps.push(best);
+    }
+    bumps.sort((a, b) => a - b);
+
     ctx.beginPath();
     ctx.moveTo(poly[0].x, poly[0].y);
+    let bi = 0;
     for (let i = 1; i < poly.length; i++) {
-      const p = poly[i], q = poly[i-1];
-      let hopped = false;
-      for (const h of hops) {
-        // is the hop point within this segment's neighbourhood?
-        const d = Geo.dist(h.x, h.y, p.x, p.y);
-        if (d < HOP_R*1.4) {
-          // draw up to entry of the bump, arc over, continue
-          const dirx = p.x - q.x, diry = p.y - q.y;
-          const L = Math.hypot(dirx, diry) || 1;
-          const ux = dirx/L, uy = diry/L;
-          const ex = h.x - ux*HOP_R, ey = h.y - uy*HOP_R;     // bump start
-          const fx = h.x + ux*HOP_R, fy = h.y + uy*HOP_R;     // bump end
-          ctx.lineTo(ex, ey);
-          const ang = Math.atan2(uy, ux);
-          ctx.arc(h.x, h.y, HOP_R, ang - Math.PI, ang, false);
-          ctx.moveTo(fx, fy);
-          hopped = true;
-          break;
-        }
+      const q = poly[i-1], p = poly[i];
+      if (bi < bumps.length && bumps[bi] === i) {
+        bi++;
+        const mx = (q.x+p.x)/2, my = (q.y+p.y)/2;       // bridge over segment midpoint
+        const dirx = p.x-q.x, diry = p.y-q.y;
+        const L = Math.hypot(dirx, diry) || 1;
+        const ux = dirx/L, uy = diry/L;
+        ctx.lineTo(mx - ux*HOP_R, my - uy*HOP_R);
+        const ang = Math.atan2(uy, ux);
+        ctx.arc(mx, my, HOP_R, ang - Math.PI, ang, false);
+        ctx.moveTo(mx + ux*HOP_R, my + uy*HOP_R);
+        ctx.lineTo(p.x, p.y);
+      } else {
+        ctx.lineTo(p.x, p.y);
       }
-      if (!hopped) ctx.lineTo(p.x, p.y);
     }
     ctx.stroke();
   }
@@ -588,7 +768,11 @@ const App = (() => {
     presetName: "tree",
     running: false,
     speed: 6,
-    params: { spacing: 0.62, gravity: 0.03 },
+    params: {
+      spacing: 0.62, gravity: 0.03,           // force-directed knobs
+      cooling: 0.97,                           // annealing / hillclimb schedule
+      weights: { cross: 1, len: 1, overlap: 1 }, // cost objective weights
+    },
     opts: { curve: true, hops: true, labels: false },
     view: { w: 0, h: 0, dpr: 1 },
     bounds: { x0: 0, y0: 0, x1: 0, y1: 0 },
@@ -617,6 +801,7 @@ const App = (() => {
     if (reseed) seedPositions(state.graph, state.bounds);
     buildSolver();
     updateMetricChips(true);
+    setRunning(true);
   }
 
   function buildSolver() {
@@ -624,59 +809,27 @@ const App = (() => {
     document.getElementById("hud-solver").textContent = state.solverName;
   }
 
-  // crossing detection on the rendered polylines (shared by metric + hops)
-  function computeCrossings() {
-    const g = state.geom, out = [];
-    for (let i = 0; i < g.length; i++) {
-      const A = g[i];
-      for (let j = i+1; j < g.length; j++) {
-        const B = g[j];
-        if (shareEndpoint(A, B)) continue;          // adjacent edges don't "cross"
-        const hit = polyInt(A.poly, B.poly);
-        if (hit) out.push({ x: hit.x, y: hit.y, eA: i, eB: j });
-      }
-    }
-    return out;
-  }
-  function shareEndpoint(A, B) {
-    return A.a === B.a || A.a === B.b || A.b === B.a || A.b === B.b;
-  }
-  function polyInt(pa, pb) {
-    for (let i = 1; i < pa.length; i++) {
-      const a1 = pa[i-1], a2 = pa[i];
-      for (let j = 1; j < pb.length; j++) {
-        const b1 = pb[j-1], b2 = pb[j];
-        const hit = Geo.segInt(a1.x,a1.y,a2.x,a2.y, b1.x,b1.y,b2.x,b2.y);
-        if (hit) return hit;
-      }
-    }
-    return null;
-  }
-
-  function totalEdgeLength() {
-    let s = 0;
-    for (const e of state.graph.edges) {
-      const a = state.graph.nodes[e.source], b = state.graph.nodes[e.target];
-      s += Geo.dist(a.x, a.y, b.x, b.y);
-    }
-    return s;
-  }
-
   function recompute() {
+    // Objective.crossings (straight chords) is the single source of truth for
+    // the metric AND the hops; edges are merely drawn curved.
     state.geom = Renderer.edgeGeometry(state.graph, state.opts.curve);
-    state.crossings = computeCrossings();
+    state.crossings = Objective.crossings(state.graph);
   }
 
   function cost() {
-    const len = totalEdgeLength();
-    // simple readable objective; SA will optimise a richer one later
-    return state.crossings.length * 100 + len * 0.05;
+    return Objective.full(state.graph, state.bounds, state.params.weights);
   }
 
   function updateMetricChips(full) {
-    document.getElementById("hud-iter").textContent = state.solver ? state.solver.iter : 0;
+    const s = state.solver;
+    document.getElementById("hud-iter").textContent = s ? s.iter : 0;
     document.getElementById("hud-cross").textContent = state.crossings.length;
     document.getElementById("hud-cost").textContent = Math.round(cost());
+    const tempChip = document.getElementById("hud-temp");
+    if (tempChip) {
+      const t = s && s.temp !== undefined ? s.temp : null;
+      tempChip.textContent = t === null ? "–" : t.toFixed(1);
+    }
     if (full) {
       document.getElementById("m-nodes").textContent = state.graph.nodes.length;
       document.getElementById("m-edges").textContent = state.graph.edges.length;
@@ -742,7 +895,7 @@ const App = (() => {
     gs.addEventListener("change", () => loadGraph(gs.value));
 
     document.getElementById("sel-solver").addEventListener("change", e => {
-      state.solverName = e.target.value; buildSolver();
+      state.solverName = e.target.value; buildSolver(); updateSolverUI(); setRunning(true);
     });
 
     document.getElementById("btn-play").addEventListener("click", () => setRunning(!state.running));
@@ -764,7 +917,30 @@ const App = (() => {
     document.getElementById("tg-hops").addEventListener("change", e => state.opts.hops = e.target.checked);
     document.getElementById("tg-labels").addEventListener("change", e => state.opts.labels = e.target.checked);
 
+    // parameter sliders: live-bind to state.params; weights apply immediately,
+    // structural knobs (spacing/gravity/cooling) take effect on the next re-solve.
+    bindSlider("rng-spacing", "val-spacing", v => state.params.spacing = v, 2);
+    bindSlider("rng-gravity", "val-gravity", v => state.params.gravity = v, 3);
+    bindSlider("rng-cooling", "val-cooling", v => state.params.cooling = v, 3);
+    bindSlider("rng-wcross",  "val-wcross",  v => state.params.weights.cross = v, 1);
+    bindSlider("rng-wlen",    "val-wlen",    v => state.params.weights.len = v, 1);
+    bindSlider("rng-woverlap","val-woverlap",v => state.params.weights.overlap = v, 1);
+
     window.addEventListener("resize", () => { resize(); });
+    updateSolverUI();
+  }
+
+  function bindSlider(rangeId, valId, set, digits) {
+    const r = document.getElementById(rangeId), v = document.getElementById(valId);
+    const apply = () => { set(+r.value); v.textContent = (+r.value).toFixed(digits); };
+    r.addEventListener("input", apply); apply();
+  }
+
+  // Show only the parameters relevant to the active solver.
+  function updateSolverUI() {
+    const isForce = state.solverName === "force";
+    document.getElementById("params-force").style.display = isForce ? "" : "none";
+    document.getElementById("params-meta").style.display  = isForce ? "none" : "";
   }
 
   function init() {
