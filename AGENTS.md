@@ -74,6 +74,23 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   forces a full-scene re-stroke or the per-frame `Objective.full` recompute. Don't move
   the glow back into the static `draw()`, and don't call `cost()`/`updateMetricChips` every
   frame — gate them.
+- **Camera (pan/zoom) is a pure VIEW layer.** `state.camera = {x, y, scale}` with
+  `screen = world*scale + (x, y)`. The solver, routing (A*), crossing detection and cost ALL
+  stay in **world space and are untouched** — only two places read the camera: the renderer
+  applies it (`Renderer.applyView` resets to device space, clears the whole backing store,
+  then sets the `dpr × camera` transform, so everything downstream draws in world coords),
+  and `ptr()` inverts it for hit-testing/drag. `scale 1 / offset 0` is byte-identical to no
+  camera. A camera change calls `cameraMoved()` → sets `_redrawStatic` (no re-route: geometry
+  is world-space, `posSig` is unchanged) and slides the body dot-grid with the world. **This
+  is a *true* zoom** — the ctx scale magnifies line widths, node radii, hops, glow and the
+  routing grid uniformly, so none of those px constants need per-zoom tying (see the resolved
+  note below). Gestures (all on `#canvas`, which has `touch-action:none`): wheel = 2-finger
+  pan; ctrl/⌘+wheel = zoom about the cursor (trackpad pinch arrives as ctrl+wheel); 1 pointer
+  on empty space (or ⌘-over-a-node) = drag-pan; 1 pointer on a node = drag the node; 2 pointers
+  = pinch-zoom + pan; double-click = reset to identity. `bounds` stays viewport-derived (the
+  solver box is unchanged); zoom-out just reveals the surrounding space. When clearing the glow
+  layer on toggle-off, reset to identity first (`setTransform(1,0,0,1,0,0)`) or the clear
+  misses panned/zoomed regions.
 - **Signal glow** (DISPLAY toggle `tg-glow`, off by default): an animated overlay on the
   dedicated `#glow-canvas` (`Renderer.drawGlowLayer`, repainted every frame). A glowing
   comet (bright head + gradient tail) eases along each edge's polyline by arc-length
@@ -398,8 +415,10 @@ curved/straight routing and in the crossing metric. This is the biggest remainin
   routes) that overlap are de-collided at the ports (PHASE 2 offsets), not by `separateLanes`
   — in very dense fans this can still leave a short collinear stub. Could extend PHASE 2's
   spread, or allow a tiny jog (but that costs a bend — weigh it).
-- `LANE_STEP`/`LANE_TOL` are fixed px; on extreme zoom they don't scale. Tie them to `cell`
-  if zoom is ever added.
+- `LANE_STEP`/`LANE_TOL` are fixed px in **world space**. With the camera being a render-time
+  transform (see "Camera" above), they scale on screen with the zoom for free — the old
+  concern about tying them to `cell` is moot. They'd only matter if zoom ever changed the
+  world-space routing grid, which it doesn't.
 
 ## Other ideas (lower priority)
 

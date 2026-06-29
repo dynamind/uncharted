@@ -52,6 +52,7 @@
   /* ---------- stage ---------- */
   #stage { position: relative; overflow: hidden; }
   #canvas, #glow-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #canvas { touch-action: none; }          /* we handle pan/pinch ourselves via pointer events */
   #glow-canvas { pointer-events: none; }   /* overlay: animated glow only, never intercepts drags */
 
   #title {
@@ -857,7 +858,7 @@ const Renderer = (() => {
   // appears where the drawn lines truly cross — never off-position or phantom.
 
   function draw(ctx, view, graph, geom, crossings, opts) {
-    ctx.clearRect(0, 0, view.w, view.h);
+    applyView(ctx, view);                  // clear in device space, then enter world space
 
     // group crossings by the edge that should bridge *over* (higher index)
     const hopsByEdge = new Map();
@@ -891,8 +892,18 @@ const Renderer = (() => {
   // repainted only when geometry changes. So the continuous animation never forces a
   // re-stroke of all edges/nodes/arrows (nor the per-frame metric recompute).
   function drawGlowLayer(gctx, view, geom, now) {
-    gctx.clearRect(0, 0, view.w, view.h);
+    applyView(gctx, view);
     drawGlow(gctx, geom, now);
+  }
+
+  // Clear the whole backing store in device space, then set the world→device transform
+  // (dpr × camera). Everything downstream draws in world coordinates and is scaled/panned
+  // uniformly — lines, nodes, hops, glow, arrows — a true zoom.
+  function applyView(c, view) {
+    const dpr = view.dpr, cam = view.cam || { x: 0, y: 0, scale: 1 };
+    c.setTransform(dpr, 0, 0, dpr, 0, 0);
+    c.clearRect(0, 0, view.w, view.h);
+    c.setTransform(dpr * cam.scale, 0, 0, dpr * cam.scale, dpr * cam.x, dpr * cam.y);
   }
 
   // Directed glyph at the TARGET end. The robust heading (stable near touching /
@@ -1119,6 +1130,10 @@ const App = (() => {
     opts: { routing: "curved", hops: true, labels: false, arrows: false, glow: false },
     view: { w: 0, h: 0, dpr: 1 },
     bounds: { x0: 0, y0: 0, x1: 0, y1: 0 },
+    // Camera: a pure VIEW layer. screen = world * scale + (x, y). The solver, routing and
+    // crossing detection all stay in world space; only rendering (the ctx transform) and
+    // pointer math read the camera. scale 1 / offset 0 ⇒ identical to no camera at all.
+    camera: { x: 0, y: 0, scale: 1 },
   };
 
   function bounds() {
@@ -1132,12 +1147,26 @@ const App = (() => {
   function fitCanvas() {
     const r = stage.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
-    state.view = { w: r.width, h: r.height, dpr };
+    state.view = { w: r.width, h: r.height, dpr, cam: state.camera };
     canvas.width = glowCanvas.width = r.width * dpr;
     canvas.height = glowCanvas.height = r.height * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     _redrawStatic = true;                 // backing store was cleared → repaint current geometry
+  }
+
+  // A camera change repaints (the world geometry is unchanged, so no re-route) and slides
+  // the dot-grid with the world so it reads as ground rather than a fixed screen overlay.
+  function cameraMoved() {
+    _redrawStatic = true;
+    const { x, y, scale } = state.camera;
+    document.body.style.backgroundSize = `${24 * scale}px ${24 * scale}px`;
+    document.body.style.backgroundPosition = `${x - 12 * scale}px ${y - 12 * scale}px`;
+  }
+  // Zoom by `factor` about a screen point (sx, sy in stage px), keeping that point fixed.
+  function zoomAround(sx, sy, factor) {
+    const cam = state.camera;
+    const ns = Geo.clamp(cam.scale * factor, 0.2, 5);
+    const wx = (sx - cam.x) / cam.scale, wy = (sy - cam.y) / cam.scale;
+    cam.x = sx - wx * ns; cam.y = sy - wy * ns; cam.scale = ns;
   }
   function resize() {
     fitCanvas();
@@ -1258,7 +1287,8 @@ const App = (() => {
       Renderer.drawGlowLayer(gctx, state.view, state.geom, performance.now());
       _glowDrawn = true;
     } else if (_glowDrawn) {
-      gctx.clearRect(0, 0, state.view.w, state.view.h);
+      gctx.setTransform(1, 0, 0, 1, 0, 0);                    // device space, ignore camera
+      gctx.clearRect(0, 0, glowCanvas.width, glowCanvas.height);
       _glowDrawn = false;
     }
 
@@ -1298,28 +1328,82 @@ const App = (() => {
     seedPositions(state.graph, state.bounds); buildSolver(); setRunning(true);
   }
 
-  /* -------- interaction: drag nodes -------- */
-  let drag = null;
+  /* -------- interaction: drag nodes, pan & zoom the camera --------
+     One pointer on a node drags it; one pointer on empty space (or ⌘-held over a node)
+     pans; two pointers pinch-zoom + pan. Wheel pans (2-finger trackpad); ctrl/⌘+wheel
+     zooms about the cursor (trackpad pinch arrives as ctrl+wheel). Double-click resets. */
+  let drag = null, pan = null, pinch = null;
+  const pointers = new Map();                 // pointerId → last screen position
   function nodeAt(x, y) {
     for (const n of state.graph.nodes) if (Nodes.hit(n, x, y)) return n;
     return null;
   }
-  function ptr(e) {
+  function stagePt(e) {                        // screen px within the stage
     const r = canvas.getBoundingClientRect();
     return { x: e.clientX - r.left, y: e.clientY - r.top };
   }
+  function ptr(e) {                            // world coords (invert the camera)
+    const s = stagePt(e), cam = state.camera;
+    return { x: (s.x - cam.x) / cam.scale, y: (s.y - cam.y) / cam.scale };
+  }
+  const twoPointers = () => [...pointers.values()];
+  const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+  const mid  = (a, b) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 });
+
   canvas.addEventListener("pointerdown", e => {
-    const p = ptr(e);
-    const n = nodeAt(p.x, p.y);
-    if (n) { drag = n; n.fixed = true; canvas.setPointerCapture(e.pointerId); }
+    canvas.setPointerCapture(e.pointerId);
+    pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pointers.size === 2) {                 // second finger → pinch (drop any drag/pan)
+      if (drag) { drag.fixed = false; drag = null; }
+      pan = null;
+      const [a, b] = twoPointers();
+      pinch = { d: dist(a, b), m: mid(a, b) };
+      return;
+    }
+    const p = ptr(e), n = nodeAt(p.x, p.y);
+    if (n && !e.metaKey) { drag = n; n.fixed = true; }     // drag node (⌘ forces a pan)
+    else { pan = { x: e.clientX, y: e.clientY }; }          // empty space, or ⌘-over-node
   });
   canvas.addEventListener("pointermove", e => {
-    if (!drag) return;
-    const p = ptr(e);
-    drag.x = Geo.clamp(p.x, state.bounds.x0, state.bounds.x1);
-    drag.y = Geo.clamp(p.y, state.bounds.y0, state.bounds.y1);
+    if (pointers.has(e.pointerId)) pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch && pointers.size >= 2) {
+      const [a, b] = twoPointers(), d = dist(a, b) || 1, m = mid(a, b), r = canvas.getBoundingClientRect();
+      zoomAround(m.x - r.left, m.y - r.top, d / pinch.d);
+      state.camera.x += m.x - pinch.m.x; state.camera.y += m.y - pinch.m.y;
+      pinch.d = d; pinch.m = m; cameraMoved();
+      return;
+    }
+    if (drag) {
+      const p = ptr(e);
+      drag.x = Geo.clamp(p.x, state.bounds.x0, state.bounds.x1);
+      drag.y = Geo.clamp(p.y, state.bounds.y0, state.bounds.y1);
+    } else if (pan) {
+      state.camera.x += e.clientX - pan.x; state.camera.y += e.clientY - pan.y;
+      pan = { x: e.clientX, y: e.clientY }; cameraMoved();
+    }
   });
-  canvas.addEventListener("pointerup", () => { if (drag) { drag.fixed = false; drag = null; } });
+  function endPointer(e) {
+    pointers.delete(e.pointerId);
+    if (pointers.size < 2) pinch = null;
+    if (pointers.size === 0) { if (drag) { drag.fixed = false; drag = null; } pan = null; }
+    else if (pointers.size === 1) {            // a finger lifted from a pinch → resume panning
+      const [o] = twoPointers(); pan = { x: o.x, y: o.y };
+    }
+  }
+  canvas.addEventListener("pointerup", endPointer);
+  canvas.addEventListener("pointercancel", endPointer);
+
+  canvas.addEventListener("wheel", e => {
+    e.preventDefault();
+    const s = stagePt(e);
+    if (e.ctrlKey || e.metaKey) zoomAround(s.x, s.y, Math.exp(-e.deltaY * 0.0015));  // pinch / ⌘-scroll
+    else { state.camera.x -= e.deltaX; state.camera.y -= e.deltaY; }                 // 2-finger pan
+    cameraMoved();
+  }, { passive: false });
+
+  canvas.addEventListener("dblclick", () => {
+    state.camera.x = 0; state.camera.y = 0; state.camera.scale = 1; cameraMoved();
+  });
 
   /* -------- UI wiring -------- */
   function wire() {
