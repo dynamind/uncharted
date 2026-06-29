@@ -286,6 +286,7 @@
    ========================================================================== */
 import { Geo, Nodes, ORTHO, edgeGeometry, arrowHeading } from "./src/router.js";
 import { graphSources, getGraphSource } from "./src/graphs/index.js";
+import { getCrossingEngine } from "./src/crossings/index.js";
 
 /* ---------------------------------------------------------------------------
    2. Graph model + sources
@@ -753,62 +754,9 @@ LayoutEngine.register("circular", makeConstructive("circular", circularTargets))
 const Renderer = (() => {
   const HOP_R = 5;
 
-  // ---- crossing detection on the ACTUAL rendered geometry -----------------
-  // Hops and the live metric both read from here, so a hop only ever appears
-  // where the drawn lines truly cross — never off-position, flipped, or phantom.
-  function bbox(poly) {
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const p of poly) {
-      if (p.x < x0) x0 = p.x; if (p.x > x1) x1 = p.x;
-      if (p.y < y0) y0 = p.y; if (p.y > y1) y1 = p.y;
-    }
-    return { x0, y0, x1, y1 };
-  }
-  function polyIntersections(pa, pb) {
-    const res = [];
-    for (let i = 1; i < pa.length; i++) {
-      const a1 = pa[i-1], a2 = pa[i];
-      for (let j = 1; j < pb.length; j++) {
-        const b1 = pb[j-1], b2 = pb[j];
-        const h = Geo.segInt(a1.x,a1.y,a2.x,a2.y, b1.x,b1.y,b2.x,b2.y);
-        if (h) res.push(h);
-      }
-    }
-    return res;
-  }
-  function crossings(geom) {
-    const out = [], bb = geom.map(g => bbox(g.poly));
-    for (let i = 0; i < geom.length; i++) {
-      const A = geom[i], ba = bb[i];
-      for (let j = i+1; j < geom.length; j++) {
-        const B = geom[j];
-        if (A.a===B.a || A.a===B.b || A.b===B.a || A.b===B.b) continue;  // adjacent
-        const bj = bb[j];
-        if (ba.x1<bj.x0 || bj.x1<ba.x0 || ba.y1<bj.y0 || bj.y1<ba.y0) continue;
-        for (const h of polyIntersections(A.poly, B.poly))
-          out.push({ x: h.x, y: h.y, eA: i, eB: j });
-      }
-    }
-    return out;
-  }
-
-  // edges whose RENDERED polyline runs through a non-incident node's body. Same
-  // idea as crossings, but for the parallel-to-nothing case segInt can't see: a
-  // line ploughing across a node. Counted in the HUD so the metric can't lie
-  // (orthogonal A* routes around nodes, so this is ~0 there; it bites the straight
-  // routing the energy solvers use). One hit per (edge, node).
-  function nodePierces(geom, nodes) {
-    const out = [];
-    for (let i = 0; i < geom.length; i++) {
-      const g = geom[i], p = g.poly;
-      for (const n of nodes) {
-        if (n === g.a || n === g.b) continue;
-        for (let s = 1; s < p.length; s++)
-          if (Nodes.segHitsBody(n, p[s-1].x, p[s-1].y, p[s].x, p[s].y)) { out.push({ eA: i, node: n }); break; }
-      }
-    }
-    return out;
-  }
+  // Crossing detection (hops + the on-screen count) lives in the CrossingEngine
+  // (src/crossings/), read off the ACTUAL rendered geometry so a hop only ever
+  // appears where the drawn lines truly cross — never off-position or phantom.
 
   function draw(ctx, view, graph, geom, crossings, opts) {
     ctx.clearRect(0, 0, view.w, view.h);
@@ -943,7 +891,7 @@ const Renderer = (() => {
     ctx.stroke();
   }
 
-  return { crossings, nodePierces, draw };
+  return { draw };
 })();
 
 
@@ -1046,8 +994,9 @@ const App = (() => {
     // doesn't make edges twitch — and the approach direction picks the side.
     state.geom = edgeGeometry(state.graph, mode, state.bounds, state._prevSides);
     state._prevSides = mode === "orthogonal" ? state.geom.map(g => g.sides) : null;
-    state.crossings = Renderer.crossings(state.geom);
-    state.pierces = Renderer.nodePierces(state.geom, state.graph.nodes);
+    const cross = getCrossingEngine("default");
+    state.crossings = cross.crossings(state.geom);
+    state.pierces = cross.pierces(state.geom, state.graph.nodes);
   }
 
   function cost() {

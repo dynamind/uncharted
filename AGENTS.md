@@ -157,12 +157,16 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
     unchanged), but `routePorts` then slides the initial/final stub RUN onto the port's exact
     axis (`alignStub`) so the stub stays straight and an aligned route still collapses to a
     clean line. Pinned: dragging a box 1px moves its port ~1px (test/router.test.js).
-- **CROSSINGS ARE COMPUTED ON THE ACTUAL RENDERED POLYLINES** (`Renderer.crossings`,
-  bbox prefilter + segment test) — the metric AND the hops read from the same points,
-  so a hop only ever appears where the drawn lines truly cross. (This replaced the old
-  chord-based count, which made hops drift/flip/phantom over curves.) Hops bulge to a
-  consistent side (up; right for vertical runs). `Objective.crossings` (chord-based)
-  still exists but is only the SA/hillclimb *optimisation target*, not what's drawn.
+- **CROSSINGS ARE COMPUTED ON THE ACTUAL RENDERED POLYLINES** by the **CrossingEngine**
+  (`src/crossings/`, `crossings(geom)` + `pierces(geom, nodes)`; bbox prefilter + segment
+  test) — the on-screen count AND the hops read from the same points, so a hop only ever
+  appears where the drawn lines truly cross. (This replaced the old chord-based count,
+  which made hops drift/flip/phantom over curves.) Hops bulge to a consistent side (up;
+  right for vertical runs). **Siblings are NOT skipped**: two edges sharing a node only
+  fail to cross when drawn straight; curved siblings can bulge across each other and that
+  crossing must get a hop (segInt ignores endpoint-coincident hits, so the shared node
+  never makes a phantom). This is distinct from `Objective.crossings` (chord-based, skips
+  adjacent), which remains the SA/hillclimb *optimization target*, not what's drawn.
 - **An edge running THROUGH a non-incident node's body counts as a crossing**
   (`Nodes.segHitsBody` — clip the segment to the convex shape, require >3px penetration;
   rect/diamond via half-plane clip, circle via the quadratic). Without it the energy
