@@ -751,7 +751,6 @@ LayoutEngine.register("circular", makeConstructive("circular", circularTargets))
    4. Renderer  (Nodes geometry + edge routing are imported from ./src/router.js)
    ------------------------------------------------------------------------- */
 const Renderer = (() => {
-  const SAMPLES = 18;        // bezier samples per curved edge
   const HOP_R = 5;
 
   // ---- crossing detection on the ACTUAL rendered geometry -----------------
@@ -944,7 +943,7 @@ const Renderer = (() => {
     ctx.stroke();
   }
 
-  return { crossings, nodePierces, draw, SAMPLES };
+  return { crossings, nodePierces, draw };
 })();
 
 

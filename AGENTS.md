@@ -81,10 +81,17 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   *inside* box/diamond bodies, which flipped the arrowhead 180° for edges shorter than
   ~12× the border half-extent. Circles were immune (R=8). Don't reintroduce
   centre-anchored curve sampling.
+- **Renderers** live under `src/renderers/` (same registry pattern). A `Renderer` is
+  `{ id, render(path, ctx) → { poly, tangents } }`: it flattens a Path into the drawn
+  polyline plus per-vertex unit tangents (so the arrow/crossing engines read true
+  geometry off the line, not control points). `straight` draws the spine as-is;
+  `curved` samples the perpendicular-bulge quadratic bézier (owns `SAMPLES`). A
+  routing *mode* = a (PathEngine, Renderer) pair (`ROUTING` in router.js): straight =
+  (direct, straight), curved = (direct, curved), orthogonal = (orthogonal, straight).
+  The old vestigial `SAMPLES` in index.html's canvas Renderer was dead and removed.
 - **Edge routing is separate from solving.** `edgeGeometry(graph, mode, bounds, prev)`
-  dispatches via the path registry, flattens each spine (curved = perpendicular-bulge
-  quadratic bézier between the ports), and returns per-edge rendered polylines
-  `{ poly, a, b, sides? }`. Modes: `straight | curved | orthogonal`. Orthogonal is
+  dispatches via the path + renderer registries and returns per-edge geometry
+  `{ poly, tangents, a, b, sides? }`. Modes: `straight | curved | orthogonal`. Orthogonal is
   grid **A\*** (turn-penalised) around node obstacles (+margin), connected via axis-
   aligned **ports** (route between points *outside* the boxes — never let the jog
   happen inside a box, or the endpoint clip turns it into a diagonal). Side choice

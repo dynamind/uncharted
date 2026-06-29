@@ -10,6 +10,7 @@
 // back from here. The cycle is safe: every cross-reference is call-time, never
 // touched while the modules are still loading.
 import { getPathEngine } from "./paths/index.js";
+import { getRenderer } from "./renderers/index.js";
 
 /* ---- geometry primitives ------------------------------------------------- */
 export const Geo = {
@@ -112,7 +113,6 @@ export const Nodes = {
 };
 
 export const ORTHO = { cell: 15, margin: 11, turn: 8 };
-const SAMPLES = 18;        // bezier samples per curved edge
 
 // Fan order for several edges leaving the SAME side of a node: the angle to each
 // target, measured around the side's outward normal so it increases along the
@@ -520,36 +520,25 @@ export function arrowHeading(poly, source, target, mode, back = 11) {
 }
 
 /* ---- routing dispatch (straight | curved | orthogonal) -------------------
-   A routing mode = a (PathEngine, flatten) pair. The PathEngine produces the
-   logical, border-clipped spine; flattening turns that spine into the rendered
-   polyline. Curvature is a flatten concern, so straight and curved share the
-   `direct` 2-port spine and differ only in how it is flattened. (Pluggable
-   renderers replace this inline flatten in the next pass.) */
+   A routing mode = a (PathEngine, Renderer) pair. The PathEngine produces the
+   logical, border-clipped spine; the Renderer flattens it into the drawn polyline
+   (+ per-vertex tangents). Curvature is a render concern, so straight and curved
+   share the `direct` 2-port spine and differ only in the renderer. Orthogonal
+   draws straight through its bend spine (a rounded-corner renderer could replace
+   that later). */
 const ROUTING = {
-  straight:   { path: "direct",     curve: false },
-  curved:     { path: "direct",     curve: true  },
-  orthogonal: { path: "orthogonal", curve: false },
+  straight:   { path: "direct",     render: "straight" },
+  curved:     { path: "direct",     render: "curved"   },
+  orthogonal: { path: "orthogonal", render: "straight" },
 };
-
-// Flatten a 2-point border-to-border spine into a quadratic-bézier polyline that
-// bulges perpendicular to the chord. The endpoints ARE the ports (on the border),
-// so the whole curve lies outside both node bodies — no center-anchored samples.
-function curveSpine(p0, p1, i) {
-  const mx = (p0.x+p1.x)/2, my = (p0.y+p1.y)/2;
-  const dx = p1.x-p0.x, dy = p1.y-p0.y, len = Math.hypot(dx, dy) || 1;
-  const off = Math.min(34, len*0.11) * ((i % 2) ? 1 : -1);
-  const c = { x: mx - dy/len*off, y: my + dx/len*off };
-  return Geo.sampleQuad(p0, c, p1, SAMPLES);
-}
 
 export function edgeGeometry(graph, mode, bounds, prev) {
   const cfg = ROUTING[mode] || ROUTING.curved;
   const paths = getPathEngine(cfg.path).route(graph, bounds, prev);
+  const renderer = getRenderer(cfg.render);
   return paths.map((pth, i) => {
-    const poly = (cfg.curve && pth.points.length === 2)
-      ? curveSpine(pth.points[0], pth.points[1], i)
-      : pth.points;
-    const g = { poly, a: pth.a, b: pth.b };
+    const { poly, tangents } = renderer.render(pth, { index: i });
+    const g = { poly, tangents, a: pth.a, b: pth.b };
     if (pth.sides) g.sides = pth.sides;          // preserve orthogonal hysteresis state
     return g;
   });
