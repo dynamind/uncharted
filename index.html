@@ -285,124 +285,14 @@
    objective, solvers, renderer, controller) stays here.
    ========================================================================== */
 import { Geo, Nodes, ORTHO, edgeGeometry, arrowHeading } from "./src/router.js";
+import { graphSources, getGraphSource } from "./src/graphs/index.js";
 
 /* ---------------------------------------------------------------------------
-   2. Graph model + presets
+   2. Graph model + sources
    Graph = { nodes:[{id,x,y,vx,vy,fixed}], edges:[{source,target}] }  (indices)
+   The presets now live as self-registering GraphSources under ./src/graphs/;
+   the app only touches the registry (graphSources / getGraphSource).
    ------------------------------------------------------------------------- */
-const Presets = {
-  tree(levels = 4, branch = 2) {
-    const nodes = [{ id: 0 }], edges = [];
-    let frontier = [0];
-    for (let l = 1; l < levels; l++) {
-      const next = [];
-      for (const p of frontier) {
-        for (let b = 0; b < branch; b++) {
-          const id = nodes.length; nodes.push({ id });
-          edges.push({ source: p, target: id }); next.push(id);
-        }
-      }
-      frontier = next;
-    }
-    return { nodes, edges };
-  },
-  grid(w = 6, h = 5) {
-    const nodes = [], edges = [];
-    const idx = (x, y) => y*w + x;
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) nodes.push({ id: idx(x,y) });
-    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-      if (x < w-1) edges.push({ source: idx(x,y), target: idx(x+1,y) });
-      if (y < h-1) edges.push({ source: idx(x,y), target: idx(x,y+1) });
-    }
-    return { nodes, edges };
-  },
-  random(n = 22, p = 0.12) {
-    const nodes = Array.from({ length: n }, (_, id) => ({ id })), edges = [];
-    for (let i = 0; i < n; i++) for (let j = i+1; j < n; j++)
-      if (Math.random() < p) edges.push({ source: i, target: j });
-    // guarantee connectivity: chain leftovers
-    const seen = new Set(edges.flatMap(e => [e.source, e.target]));
-    for (let i = 0; i < n; i++) if (!seen.has(i))
-      edges.push({ source: i, target: (i+1) % n });
-    return { nodes, edges };
-  },
-  cube() { // Q3 hypercube graph (3-cube)
-    const nodes = Array.from({ length: 8 }, (_, id) => ({ id })), edges = [];
-    for (let i = 0; i < 8; i++) for (let b = 0; b < 3; b++) {
-      const j = i ^ (1 << b);
-      if (i < j) edges.push({ source: i, target: j });
-    }
-    return { nodes, edges };
-  },
-  bipartite(a = 3, b = 3) { // complete bipartite K(a,b) — K(3,3) is non-planar
-    const nodes = Array.from({ length: a+b }, (_, id) => ({ id })), edges = [];
-    for (let i = 0; i < a; i++) for (let j = 0; j < b; j++)
-      edges.push({ source: i, target: a + j });
-    return { nodes, edges };
-  },
-  complete(n = 6) { // K_n — K5 is non-planar
-    const nodes = Array.from({ length: n }, (_, id) => ({ id })), edges = [];
-    for (let i = 0; i < n; i++) for (let j = i+1; j < n; j++)
-      edges.push({ source: i, target: j });
-    return { nodes, edges };
-  },
-  clusters(k = 3, per = 6) { // k loosely-connected dense clusters
-    const nodes = [], edges = [];
-    const heads = [];
-    for (let c = 0; c < k; c++) {
-      const base = nodes.length, head = base;
-      for (let i = 0; i < per; i++) nodes.push({ id: nodes.length });
-      for (let i = 0; i < per; i++) for (let j = i+1; j < per; j++)
-        if (Math.random() < 0.55) edges.push({ source: base+i, target: base+j });
-      heads.push(head);
-    }
-    for (let c = 1; c < k; c++) edges.push({ source: heads[c-1], target: heads[c] });
-    return { nodes, edges };
-  },
-  flowchart() { // a small DAG that reads like a real flowchart
-    const defs = [
-      ["Start","rect"], ["Receive\nrequest","rect"], ["Authorised?","diamond"],
-      ["Reject","rect"], ["Parse body","rect"], ["Valid?","diamond"],
-      ["Process","rect"], ["Error","rect"], ["Respond","rect"], ["End","rect"],
-    ];
-    const nodes = defs.map((d, i) => ({
-      id: i, label: d[0], shape: d[1],
-      w: d[1] === "diamond" ? 104 : 98, h: d[1] === "diamond" ? 56 : 40,
-    }));
-    const E = (s, t) => ({ source: s, target: t });
-    const edges = [
-      E(0,1), E(1,2), E(2,4), E(2,3),     // start → receive → auth? → (yes parse / no reject)
-      E(4,5), E(5,6), E(5,7),             // parse → valid? → (yes process / no error)
-      E(6,8), E(3,8), E(7,8), E(8,9),     // process/reject/error → respond → end
-    ];
-    return { nodes, edges };
-  },
-
-  spindle() { // fan-out → fan-in: one divergence + one convergence, to showcase per-side
-              // port distribution. Split's BOTTOM fans to N workers; Merge's TOP receives
-              // them all — both sides should comb into evenly-spaced ports.
-    const mids = ["A", "B", "C", "D", "E"];
-    const defs = ["Split", ...mids, "Merge"];
-    const nodes = defs.map((label, i) => ({ id: i, label, shape: "rect", w: 66, h: 38 }));
-    const split = 0, merge = defs.length - 1;
-    const E = (s, t) => ({ source: s, target: t });
-    const edges = [];
-    mids.forEach((_, k) => { const m = 1 + k; edges.push(E(split, m), E(m, merge)); });
-    return { nodes, edges };
-  },
-};
-
-const PRESET_LIST = [
-  ["flowchart", "Flowchart (DAG)",    () => Presets.flowchart()],
-  ["spindle",   "Fan-out / fan-in",   () => Presets.spindle()],
-  ["tree",      "Binary tree",        () => Presets.tree(5, 2)],
-  ["grid",      "Grid lattice 6×5",   () => Presets.grid(6, 5)],
-  ["cube",      "Cube graph Q₃",      () => Presets.cube()],
-  ["random",    "Random G(n,p)",      () => Presets.random(22, 0.12)],
-  ["clusters",  "Clusters",           () => Presets.clusters(3, 6)],
-  ["bipartite", "K₃,₃ (non-planar)",  () => Presets.bipartite(3, 3)],
-  ["complete",  "K₆ (dense)",         () => Presets.complete(6)],
-];
 
 // Scatter nodes into the play area as a starting state.
 function seedPositions(graph, bounds) {
@@ -735,7 +625,7 @@ function layeredTargets(graph, bounds, params) {
   });
 
   // 1. layer assignment — longest-path along edge DIRECTION (source→target), so
-  //    a DAG/flowchart flows top-down with its sources on top. Presets build
+  //    a DAG/flowchart flows top-down with its sources on top. Graph sources build
   //    edges with source<target, so this is acyclic; the pass count caps cycles.
   const layer = new Array(N).fill(0);
   for (let pass = 0; pass < N; pass++) {
@@ -1113,8 +1003,7 @@ const App = (() => {
 
   function loadGraph(presetName, reseed = true) {
     state.presetName = presetName;
-    const def = PRESET_LIST.find(p => p[0] === presetName) || PRESET_LIST[0];
-    state.graph = def[2]();
+    state.graph = getGraphSource(presetName).build();
     state.bounds = bounds();
     if (reseed) seedPositions(state.graph, state.bounds);
     buildSolver();
@@ -1239,19 +1128,27 @@ const App = (() => {
   function wire() {
     // populate selects
     const gs = document.getElementById("sel-graph");
-    for (const [id, label] of PRESET_LIST) {
+    for (const { id, label } of graphSources()) {
       const o = document.createElement("option"); o.value = id; o.textContent = label; gs.appendChild(o);
     }
     gs.value = state.presetName;
     gs.addEventListener("change", () => {
-      // the DAG presets shine with the layered solver + orthogonal routing
-      if (gs.value === "flowchart" || gs.value === "spindle") {
-        state.solverName = "layered";
-        document.getElementById("sel-solver").value = "layered";
-        state.opts.routing = "orthogonal";
-        document.getElementById("sel-routing").value = "orthogonal";
-        state.opts.arrows = true;                       // directed DAG → show flow direction
-        document.getElementById("tg-arrows").checked = true;
+      // a source can declare the UI defaults it shines with (e.g. DAGs prefer the
+      // layered solver + orthogonal routing + arrows).
+      const prefer = getGraphSource(gs.value).prefer;
+      if (prefer) {
+        if (prefer.solver) {
+          state.solverName = prefer.solver;
+          document.getElementById("sel-solver").value = prefer.solver;
+        }
+        if (prefer.routing) {
+          state.opts.routing = prefer.routing;
+          document.getElementById("sel-routing").value = prefer.routing;
+        }
+        if (prefer.arrows !== undefined) {
+          state.opts.arrows = prefer.arrows;            // directed DAG → show flow direction
+          document.getElementById("tg-arrows").checked = prefer.arrows;
+        }
         updateSolverUI();
       }
       loadGraph(gs.value);

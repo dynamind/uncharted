@@ -26,8 +26,23 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   must be 0. The committed root `index.html` is the Vite *entry* (imports `./src/router.js`)
   and won't run directly from `file://` — that's expected; ship the built `dist/index.html`.
 - `src/router.js` is **pure / DOM-free** (Geo, Nodes, ORTHO, sidesForEdge,
-  orthogonalGeometry, edgeGeometry). Everything else stays inline in `index.html`'s
-  `<script type="module">`. Keep the router pure so the tests stay fast and trustworthy.
+  orthogonalGeometry, edgeGeometry). Keep the router pure so the tests stay fast and
+  trustworthy.
+- **Modularization (in progress):** we are decomposing the rendering pipeline into
+  small, pluggable modules behind interfaces (ports-and-adapters), each with its own
+  registry, so alternative implementations can be added and unit-tested in isolation.
+  Vite (`vite-plugin-singlefile`) still inlines the whole module graph, so the
+  single-file deliverable is unaffected. The remaining app glue stays inline in
+  `index.html`'s `<script type="module">` until it is extracted.
+- **Graph sources** live under `src/graphs/`. A `GraphSource` is
+  `{ id, label, build() → {nodes, edges}, prefer? }`; `prefer` (`{solver?, routing?,
+  arrows?}`) declares the UI defaults that source shines with (e.g. DAGs prefer
+  layered + orthogonal + arrows). Each source self-registers via
+  `src/graphs/registry.js` (a standalone registry module, imported by the sources to
+  avoid a circular-import TDZ); `src/graphs/index.js` side-effect-imports them in
+  dropdown order and re-exports `graphSources()` / `getGraphSource(id)`. Add a graph =
+  drop a file that calls `register()` + one import line in `index.js`; nothing in the
+  app changes.
 
 ## Hard requirements (from the user, do not regress)
 
