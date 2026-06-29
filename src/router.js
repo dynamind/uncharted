@@ -6,6 +6,11 @@
    rendered polylines. The app imports Geo / Nodes / edgeGeometry from here.
    ========================================================================== */
 
+// PathEngines live in ./paths and import primitives (Nodes, orthogonalGeometry)
+// back from here. The cycle is safe: every cross-reference is call-time, never
+// touched while the modules are still loading.
+import { getPathEngine } from "./paths/index.js";
+
 /* ---- geometry primitives ------------------------------------------------- */
 export const Geo = {
   // Do segments p1->p2 and p3->p4 properly cross? Returns intersection point or null.
@@ -514,26 +519,39 @@ export function arrowHeading(poly, source, target, mode, back = 11) {
   return { tx: tip.x, ty: tip.y, bx, by, ux: dx/L, uy: dy/L };
 }
 
-/* ---- routing dispatch (straight | curved | orthogonal) ------------------- */
+/* ---- routing dispatch (straight | curved | orthogonal) -------------------
+   A routing mode = a (PathEngine, flatten) pair. The PathEngine produces the
+   logical, border-clipped spine; flattening turns that spine into the rendered
+   polyline. Curvature is a flatten concern, so straight and curved share the
+   `direct` 2-port spine and differ only in how it is flattened. (Pluggable
+   renderers replace this inline flatten in the next pass.) */
+const ROUTING = {
+  straight:   { path: "direct",     curve: false },
+  curved:     { path: "direct",     curve: true  },
+  orthogonal: { path: "orthogonal", curve: false },
+};
+
+// Flatten a 2-point border-to-border spine into a quadratic-bézier polyline that
+// bulges perpendicular to the chord. The endpoints ARE the ports (on the border),
+// so the whole curve lies outside both node bodies — no center-anchored samples.
+function curveSpine(p0, p1, i) {
+  const mx = (p0.x+p1.x)/2, my = (p0.y+p1.y)/2;
+  const dx = p1.x-p0.x, dy = p1.y-p0.y, len = Math.hypot(dx, dy) || 1;
+  const off = Math.min(34, len*0.11) * ((i % 2) ? 1 : -1);
+  const c = { x: mx - dy/len*off, y: my + dx/len*off };
+  return Geo.sampleQuad(p0, c, p1, SAMPLES);
+}
+
 export function edgeGeometry(graph, mode, bounds, prev) {
-  if (mode === "orthogonal") return orthogonalGeometry(graph, bounds, prev);
-  const { nodes, edges } = graph;
-  return edges.map((e, i) => {
-    const a = nodes[e.source], b = nodes[e.target];
-    let poly;
-    if (mode === "curved") {
-      const p0 = { x: a.x, y: a.y }, p1 = { x: b.x, y: b.y };
-      const mx = (p0.x+p1.x)/2, my = (p0.y+p1.y)/2;
-      const dx = p1.x-p0.x, dy = p1.y-p0.y, len = Math.hypot(dx, dy) || 1;
-      const off = Math.min(34, len*0.11) * ((i % 2) ? 1 : -1);
-      const c = { x: mx - dy/len*off, y: my + dx/len*off };
-      poly = Geo.sampleQuad(p0, c, p1, SAMPLES);
-      poly[0] = Nodes.boundary(a, poly[1].x, poly[1].y);
-      poly[poly.length-1] = Nodes.boundary(b, poly[poly.length-2].x, poly[poly.length-2].y);
-    } else {
-      poly = [Nodes.boundary(a, b.x, b.y), Nodes.boundary(b, a.x, a.y)];
-    }
-    return { poly, a, b };
+  const cfg = ROUTING[mode] || ROUTING.curved;
+  const paths = getPathEngine(cfg.path).route(graph, bounds, prev);
+  return paths.map((pth, i) => {
+    const poly = (cfg.curve && pth.points.length === 2)
+      ? curveSpine(pth.points[0], pth.points[1], i)
+      : pth.points;
+    const g = { poly, a: pth.a, b: pth.b };
+    if (pth.sides) g.sides = pth.sides;          // preserve orthogonal hysteresis state
+    return g;
   });
 }
 

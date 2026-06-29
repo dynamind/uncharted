@@ -65,8 +65,26 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   `source`/`target` are node indices. Nodes default to circles; flowchart nodes set
   `shape: "rect"|"diamond"` + `w,h,label`. `Nodes` helper does size/border/hit-testing.
 - Rendering: HTML5 **Canvas** (chosen for smooth 60fps physics animation).
-- **Edge routing is separate from solving.** `edgeGeometry(graph, mode, bounds)` →
-  per-edge rendered polylines. Modes: `straight | curved | orthogonal`. Orthogonal is
+- **Path engines** live under `src/paths/` (same registry pattern as graph sources).
+  A `PathEngine` is `{ id, route(graph, bounds, prev) → Path[] }`; `Path` is
+  `{ points, a, b, sides? }` where `points` is the logical spine, length ≥ 2, with the
+  **first and last points on node borders and no point inside either node body**.
+  `direct` returns a 2-port spine (shared by straight + curved); `orthogonal` delegates
+  to the global `orthogonalGeometry` (its polyline already IS a border-clipped spine,
+  and it carries `sides` for hysteresis). A routing *mode* = a (PathEngine, flatten)
+  pair; **curvature is a flatten/render concern, not a path concern**, so straight and
+  curved share the `direct` spine and differ only in flattening.
+- **Arrow-flip fix (resolved):** the curved flatten samples the bézier **between the
+  border ports**, not between node centres — so every sample lies outside both node
+  bodies and the arrowhead's base-finding walk always steps outward. Previously the
+  curve ran centre-to-centre with only the endpoints snapped, leaving interior samples
+  *inside* box/diamond bodies, which flipped the arrowhead 180° for edges shorter than
+  ~12× the border half-extent. Circles were immune (R=8). Don't reintroduce
+  centre-anchored curve sampling.
+- **Edge routing is separate from solving.** `edgeGeometry(graph, mode, bounds, prev)`
+  dispatches via the path registry, flattens each spine (curved = perpendicular-bulge
+  quadratic bézier between the ports), and returns per-edge rendered polylines
+  `{ poly, a, b, sides? }`. Modes: `straight | curved | orthogonal`. Orthogonal is
   grid **A\*** (turn-penalised) around node obstacles (+margin), connected via axis-
   aligned **ports** (route between points *outside* the boxes — never let the jog
   happen inside a box, or the endpoint clip turns it into a diagonal). Side choice
