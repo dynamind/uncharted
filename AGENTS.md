@@ -64,7 +64,16 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
 - Graph model: `{ nodes: [{id, x, y, shape?, w?, h?, label?, ...}], edges: [{source, target}] }`.
   `source`/`target` are node indices. Nodes default to circles; flowchart nodes set
   `shape: "rect"|"diamond"` + `w,h,label`. `Nodes` helper does size/border/hit-testing.
-- Rendering: HTML5 **Canvas** (chosen for smooth 60fps physics animation).
+- Rendering: HTML5 **Canvas**, in **two stacked layers**. `#canvas` holds the static
+  scene (edges/hops/nodes/arrows); `#glow-canvas` (overlaid, `pointer-events:none`) holds
+  only the animated signal-glow. The render loop runs every rAF but **repaints the static
+  layer only when something changes** — `recompute()` sets `_redrawStatic`/`_metricsDirty`
+  on a geometry-signature change, and UI controls that alter the picture or cost call
+  `invalidate()` (weight sliders set `_metricsDirty` only). The glow layer repaints every
+  frame while enabled (cleared once when toggled off). So a continuous animation never
+  forces a full-scene re-stroke or the per-frame `Objective.full` recompute. Don't move
+  the glow back into the static `draw()`, and don't call `cost()`/`updateMetricChips` every
+  frame — gate them.
 - **Signal glow** (DISPLAY toggle `tg-glow`, off by default): an animated overlay drawn
   last in `Renderer.draw`. A glowing comet (bright head + gradient tail) eases along each
   edge's polyline by arc-length (`subPathByLength`), source→target, then rests, edges

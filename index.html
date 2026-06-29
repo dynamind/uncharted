@@ -50,7 +50,8 @@
 
   /* ---------- stage ---------- */
   #stage { position: relative; overflow: hidden; }
-  #canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #canvas, #glow-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+  #glow-canvas { pointer-events: none; }   /* overlay: animated glow only, never intercepts drags */
 
   #title {
     position: absolute; left: 20px; top: 16px; z-index: 3;
@@ -164,6 +165,7 @@
 <div id="app">
   <div id="stage">
     <canvas id="canvas"></canvas>
+    <canvas id="glow-canvas"></canvas>
     <div id="title">
       <h1>Uncharted<span class="dot">.</span></h1>
       <p>graph layout as combinatorial optimization</p>
@@ -789,8 +791,14 @@ const Renderer = (() => {
       ctx.fillStyle = getCss("--edge");
       for (let i = 0; i < geom.length; i++) drawArrowhead(ctx, geom[i].poly, geom[i].a, geom[i].b, opts.routing);
     }
+  }
 
-    if (opts.glow) drawGlow(ctx, geom, opts.time || 0);   // animated traveling-signal overlay
+  // The glow lives on its OWN canvas, repainted every frame; the static scene above is
+  // repainted only when geometry changes. So the continuous animation never forces a
+  // re-stroke of all edges/nodes/arrows (nor the per-frame metric recompute).
+  function drawGlowLayer(gctx, view, geom, now) {
+    gctx.clearRect(0, 0, view.w, view.h);
+    drawGlow(gctx, geom, now);
   }
 
   // Directed glyph at the TARGET end. The robust heading (stable near touching /
@@ -965,7 +973,7 @@ const Renderer = (() => {
     ctx.stroke();
   }
 
-  return { draw };
+  return { draw, drawGlowLayer };
 })();
 
 
@@ -982,6 +990,8 @@ function getCss(name) {
 const App = (() => {
   const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d");
+  const glowCanvas = document.getElementById("glow-canvas");
+  const gctx = glowCanvas.getContext("2d");
   const stage = document.getElementById("stage");
 
   const state = {
@@ -1016,10 +1026,12 @@ const App = (() => {
     const r = stage.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     state.view = { w: r.width, h: r.height, dpr };
-    canvas.width = r.width * dpr;
-    canvas.height = r.height * dpr;
+    canvas.width = glowCanvas.width = r.width * dpr;
+    canvas.height = glowCanvas.height = r.height * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     state.bounds = bounds();
+    invalidate();                         // canvases were cleared by the resize → repaint static
   }
 
   function loadGraph(presetName, reseed = true) {
@@ -1029,6 +1041,7 @@ const App = (() => {
     if (reseed) seedPositions(state.graph, state.bounds);
     buildSolver();
     updateMetricChips(true);
+    invalidate();                         // new graph → force a static repaint + remetric
     setRunning(true);
   }
 
@@ -1050,6 +1063,12 @@ const App = (() => {
   }
 
   let _sig = null;
+  // The static layer (edges/nodes/arrows/hops) and the metric chips are repainted only
+  // when something actually changes; the glow layer is the only thing that redraws every
+  // frame. These flags drive that: geometry changes set both via recompute(); UI controls
+  // that change the picture or the cost call invalidate().
+  let _redrawStatic = true, _metricsDirty = true, _glowDrawn = false;
+  function invalidate() { _sig = null; _redrawStatic = true; _metricsDirty = true; }
   function posSig() {
     const n = state.graph.nodes; let s = 0;
     for (let i = 0; i < n.length; i++) s += (n[i].x * 31.7 + n[i].y * 17.3) * (i + 1);
@@ -1073,6 +1092,7 @@ const App = (() => {
     const cross = getCrossingEngine("default");
     state.crossings = cross.crossings(state.geom);
     state.pierces = cross.pierces(state.geom, state.graph.nodes);
+    _redrawStatic = true; _metricsDirty = true;        // geometry moved → repaint + remetric
   }
 
   function cost() {
@@ -1082,9 +1102,10 @@ const App = (() => {
   function updateMetricChips(full) {
     const s = state.solver;
     const crossTotal = state.crossings.length + state.pierces.length;
+    const c = Math.round(cost());                       // Objective.full — only when metrics are dirty
     document.getElementById("hud-iter").textContent = s ? s.iter : 0;
     document.getElementById("hud-cross").textContent = crossTotal;
-    document.getElementById("hud-cost").textContent = Math.round(cost());
+    document.getElementById("hud-cost").textContent = c;
     const tempChip = document.getElementById("hud-temp");
     if (tempChip) {
       const t = s && s.temp !== undefined ? s.temp : null;
@@ -1095,7 +1116,7 @@ const App = (() => {
       document.getElementById("m-edges").textContent = state.graph.edges.length;
     }
     document.getElementById("m-cross").textContent = crossTotal;
-    document.getElementById("m-cost").textContent = Math.round(cost());
+    document.getElementById("m-cost").textContent = c;
   }
 
   function frame() {
@@ -1110,12 +1131,27 @@ const App = (() => {
       }
     }
     recompute();
-    Renderer.draw(ctx, state.view, state.graph, state.geom, state.crossings, {
-      hops: state.opts.hops, labels: state.opts.labels, arrows: state.opts.arrows,
-      glow: state.opts.glow, time: performance.now(),
-      routing: activeRouting(),
-    });
-    updateMetricChips(false);
+
+    // static scene: repaint only when geometry/display changed (cheap when idle)
+    if (_redrawStatic) {
+      Renderer.draw(ctx, state.view, state.graph, state.geom, state.crossings, {
+        hops: state.opts.hops, labels: state.opts.labels, arrows: state.opts.arrows,
+        routing: activeRouting(),
+      });
+      _redrawStatic = false;
+    }
+
+    // glow overlay: its OWN canvas, repainted every frame while enabled; cleared once
+    // when toggled off so it doesn't linger.
+    if (state.opts.glow) {
+      Renderer.drawGlowLayer(gctx, state.view, state.geom, performance.now());
+      _glowDrawn = true;
+    } else if (_glowDrawn) {
+      gctx.clearRect(0, 0, state.view.w, state.view.h);
+      _glowDrawn = false;
+    }
+
+    if (_metricsDirty) { updateMetricChips(false); _metricsDirty = false; }
     requestAnimationFrame(frame);
   }
 
@@ -1202,14 +1238,14 @@ const App = (() => {
     sp.addEventListener("input", applySpeed);
     applySpeed();
 
-    document.getElementById("sel-routing").addEventListener("change", e => state.opts.routing = e.target.value);
-    document.getElementById("tg-hops").addEventListener("change", e => state.opts.hops = e.target.checked);
+    document.getElementById("sel-routing").addEventListener("change", e => { state.opts.routing = e.target.value; invalidate(); });
+    document.getElementById("tg-hops").addEventListener("change", e => { state.opts.hops = e.target.checked; invalidate(); });
     document.getElementById("tg-trunk").addEventListener("change", e => {
       state.params.trunk = e.target.checked;
       if (state.solverName === "layered") { buildSolver(); setRunning(true); }  // recompute targets
     });
-    document.getElementById("tg-labels").addEventListener("change", e => state.opts.labels = e.target.checked);
-    document.getElementById("tg-arrows").addEventListener("change", e => state.opts.arrows = e.target.checked);
+    document.getElementById("tg-labels").addEventListener("change", e => { state.opts.labels = e.target.checked; invalidate(); });
+    document.getElementById("tg-arrows").addEventListener("change", e => { state.opts.arrows = e.target.checked; invalidate(); });
     document.getElementById("tg-glow").addEventListener("change", e => state.opts.glow = e.target.checked);
 
     // parameter sliders: live-bind to state.params; weights apply immediately,
@@ -1217,9 +1253,9 @@ const App = (() => {
     bindSlider("rng-spacing", "val-spacing", v => state.params.spacing = v, 2);
     bindSlider("rng-gravity", "val-gravity", v => state.params.gravity = v, 3);
     bindSlider("rng-cooling", "val-cooling", v => state.params.cooling = v, 3);
-    bindSlider("rng-wcross",  "val-wcross",  v => state.params.weights.cross = v, 1);
-    bindSlider("rng-wlen",    "val-wlen",    v => state.params.weights.len = v, 1);
-    bindSlider("rng-woverlap","val-woverlap",v => state.params.weights.overlap = v, 1);
+    bindSlider("rng-wcross",  "val-wcross",  v => { state.params.weights.cross = v; _metricsDirty = true; }, 1);
+    bindSlider("rng-wlen",    "val-wlen",    v => { state.params.weights.len = v; _metricsDirty = true; }, 1);
+    bindSlider("rng-woverlap","val-woverlap",v => { state.params.weights.overlap = v; _metricsDirty = true; }, 1);
 
     window.addEventListener("resize", () => { resize(); });
 
