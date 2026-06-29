@@ -65,6 +65,12 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   `source`/`target` are node indices. Nodes default to circles; flowchart nodes set
   `shape: "rect"|"diamond"` + `w,h,label`. `Nodes` helper does size/border/hit-testing.
 - Rendering: HTML5 **Canvas** (chosen for smooth 60fps physics animation).
+- **Signal glow** (DISPLAY toggle `tg-glow`, off by default): an animated overlay drawn
+  last in `Renderer.draw`. A glowing comet (bright head + gradient tail) eases along each
+  edge's polyline by arc-length (`subPathByLength`), source→target, then rests, edges
+  staggered so pulses ripple; drawn additively (`lighter`) with shadow-blur. It is a
+  draw-time, time-based effect (clock = `performance.now()` passed as `opts.time`), so it
+  lives in the canvas layer, not the pure `src/` modules. Tunables in the `GLOW` const.
 - **Path engines** live under `src/paths/` (same registry pattern as graph sources).
   A `PathEngine` is `{ id, route(graph, bounds, prev) → Path[] }`; `Path` is
   `{ points, a, b, sides? }` where `points` is the logical spine, length ≥ 2, with the

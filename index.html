@@ -262,6 +262,7 @@
       <label class="toggle"><input type="checkbox" id="tg-hops" checked /><span class="box"></span><span class="t">Crossing hops</span></label>
       <label class="toggle"><input type="checkbox" id="tg-trunk" checked /><span class="box"></span><span class="t">Straight trunks <span style="color:var(--ink-faint)">· layered</span></span></label>
       <label class="toggle"><input type="checkbox" id="tg-arrows" /><span class="box"></span><span class="t">Arrowheads</span></label>
+      <label class="toggle"><input type="checkbox" id="tg-glow" /><span class="box"></span><span class="t">Signal glow</span></label>
       <label class="toggle"><input type="checkbox" id="tg-labels" /><span class="box"></span><span class="t">Node labels</span></label>
     </div>
 
@@ -787,6 +788,8 @@ const Renderer = (() => {
       ctx.fillStyle = getCss("--edge");
       for (let i = 0; i < geom.length; i++) drawArrowhead(ctx, geom[i].poly, geom[i].a, geom[i].b, opts.routing);
     }
+
+    if (opts.glow) drawGlow(ctx, geom, opts.time || 0);   // animated traveling-signal overlay
   }
 
   // Directed glyph at the TARGET end. The robust heading (stable near touching /
@@ -842,6 +845,64 @@ const Renderer = (() => {
     ctx.moveTo(poly[0].x, poly[0].y);
     for (let i = 1; i < poly.length; i++) ctx.lineTo(poly[i].x, poly[i].y);
     ctx.stroke();
+  }
+
+  // the sub-polyline of `poly` between arc-lengths s0..s1 (endpoints interpolated)
+  function subPathByLength(poly, s0, s1) {
+    if (s1 <= s0) return null;
+    const pts = [];
+    let acc = 0;
+    for (let k = 1; k < poly.length; k++) {
+      const a = poly[k-1], b = poly[k], segLen = Math.hypot(b.x-a.x, b.y-a.y) || 1e-9;
+      const lo = Math.max(s0, acc), hi = Math.min(s1, acc + segLen);
+      if (hi > lo) {
+        const t0 = (lo - acc) / segLen, t1 = (hi - acc) / segLen;
+        if (pts.length === 0) pts.push({ x: a.x + (b.x-a.x)*t0, y: a.y + (b.y-a.y)*t0 });
+        pts.push({ x: a.x + (b.x-a.x)*t1, y: a.y + (b.y-a.y)*t1 });
+      }
+      acc += segLen;
+      if (acc >= s1) break;
+    }
+    return pts.length >= 2 ? pts : null;
+  }
+  const rgba = (hex, a) =>
+    `rgba(${parseInt(hex.slice(1,3),16)},${parseInt(hex.slice(3,5),16)},${parseInt(hex.slice(5,7),16)},${a})`;
+
+  // Animated "signal" overlay: a glowing comet (bright head + fading tail) eases along
+  // each edge from source to target, then rests, then repeats — edges staggered so the
+  // pulses ripple rather than march in lockstep. Drawn additively (`lighter`) with a
+  // soft shadow blur over the static edges. m = sweep, n = rest; tail is a fraction of
+  // the edge length. `now` is a free-running clock (ms).
+  const GLOW = { m: 1400, rest: 900, stagger: 150, tail: 0.30, minTail: 22, width: 2.6, blur: 8, head: 2.4 };
+  function drawGlow(ctx, geom, now) {
+    const color = getCss("--accent"), period = GLOW.m + GLOW.rest;
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.lineCap = "round"; ctx.lineJoin = "round";
+    ctx.shadowColor = color; ctx.shadowBlur = GLOW.blur;
+    for (let i = 0; i < geom.length; i++) {
+      const poly = geom[i].poly;
+      let total = 0;
+      for (let k = 1; k < poly.length; k++) total += Math.hypot(poly[k].x-poly[k-1].x, poly[k].y-poly[k-1].y);
+      if (total < 2) continue;
+      const local = (now + i*GLOW.stagger) % period;
+      if (local >= GLOW.m) continue;                              // resting between sweeps
+      const t = local / GLOW.m, p = t < 0.5 ? 2*t*t : 1 - (-2*t+2)*(-2*t+2)/2;   // ease-in-out
+      const head = p * total, tail = Math.max(GLOW.minTail, total * GLOW.tail);
+      const sub = subPathByLength(poly, Math.max(0, head - tail), head);
+      if (!sub) continue;
+      const hp = sub[sub.length-1];
+      const g = ctx.createLinearGradient(sub[0].x, sub[0].y, hp.x, hp.y);
+      g.addColorStop(0, rgba(color, 0)); g.addColorStop(0.65, rgba(color, 0.4)); g.addColorStop(1, rgba(color, 1));
+      ctx.strokeStyle = g; ctx.lineWidth = GLOW.width;
+      ctx.beginPath();
+      ctx.moveTo(sub[0].x, sub[0].y);
+      for (let k = 1; k < sub.length; k++) ctx.lineTo(sub[k].x, sub[k].y);
+      ctx.stroke();
+      ctx.fillStyle = color;                                      // bright comet head
+      ctx.beginPath(); ctx.arc(hp.x, hp.y, GLOW.head, 0, Math.PI*2); ctx.fill();
+    }
+    ctx.restore();
   }
 
   // distance from point to a segment + the parameter t of the foot
@@ -933,7 +994,7 @@ const App = (() => {
       trunk: true,                             // layered: straighten primary paths
       weights: { cross: 1, len: 1, overlap: 1 }, // cost objective weights
     },
-    opts: { routing: "curved", hops: true, labels: false, arrows: false },
+    opts: { routing: "curved", hops: true, labels: false, arrows: false, glow: false },
     view: { w: 0, h: 0, dpr: 1 },
     bounds: { x0: 0, y0: 0, x1: 0, y1: 0 },
   };
@@ -1041,6 +1102,7 @@ const App = (() => {
     recompute();
     Renderer.draw(ctx, state.view, state.graph, state.geom, state.crossings, {
       hops: state.opts.hops, labels: state.opts.labels, arrows: state.opts.arrows,
+      glow: state.opts.glow, time: performance.now(),
       routing: activeRouting(),
     });
     updateMetricChips(false);
@@ -1138,6 +1200,7 @@ const App = (() => {
     });
     document.getElementById("tg-labels").addEventListener("change", e => state.opts.labels = e.target.checked);
     document.getElementById("tg-arrows").addEventListener("change", e => state.opts.arrows = e.target.checked);
+    document.getElementById("tg-glow").addEventListener("change", e => state.opts.glow = e.target.checked);
 
     // parameter sliders: live-bind to state.params; weights apply immediately,
     // structural knobs (spacing/gravity/cooling) take effect on the next re-solve.
