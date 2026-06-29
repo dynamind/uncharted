@@ -44,12 +44,10 @@
 
   #app {
     display: grid;
-    grid-template-columns: 1fr 320px;
+    grid-template-columns: 1fr;             /* stage fills the viewport; the panel overlays it */
     height: 100vh;
     position: relative;
-    transition: grid-template-columns .28s ease;
   }
-  #app.collapsed { grid-template-columns: 1fr 0; }
 
   /* ---------- stage ---------- */
   #stage { position: relative; overflow: hidden; }
@@ -80,18 +78,26 @@
   .chip.cross b { color: var(--warn); }
   .chip.cost  b { color: var(--accent); }
 
-  /* ---------- sidebar ---------- */
+  /* ---------- sidebar ----------
+     A slide-over drawer that OVERLAYS a full-width canvas at every screen size: the
+     stage is always the full viewport (so the solver box isn't pinched by the panel),
+     and the panel floats above it with a shadow. The floating chevron opens it; the
+     in-panel × closes it. */
   #side {
+    position: absolute; top: 0; right: 0; bottom: 0;
+    width: min(330px, 90vw); z-index: 4;
     background: var(--panel);
     border-left: 1px solid var(--line);
-    overflow: hidden;                       /* clip the sliding scroll wrapper when collapsing */
+    box-shadow: -18px 0 44px rgba(0,0,0,0.5);
+    display: flex; flex-direction: column;  /* header bar + scrolling body */
+    overflow: hidden;
+    transform: translateX(0); transition: transform .28s ease;
   }
+  #app.collapsed #side { transform: translateX(100%); }   /* slide off to the right */
   .side-scroll {
-    width: 320px; height: 100%; box-sizing: border-box;
+    width: 100%; flex: 1 1 auto; min-height: 0; box-sizing: border-box;
     overflow-y: auto; padding: 18px 16px 40px;
-    transition: transform .28s ease;
   }
-  #app.collapsed .side-scroll { transform: translateX(100%); }   /* slide off to the right */
   .side-scroll::-webkit-scrollbar { width: 9px; }
   .side-scroll::-webkit-scrollbar-thumb { background: var(--line); border-radius: 9px; }
 
@@ -108,24 +114,31 @@
   #side-toggle:hover { border-color: var(--ink-faint); color: var(--ink); }
   #side-toggle svg { width: 15px; height: 15px; transition: transform .28s ease; }
   #app.collapsed #side-toggle svg { transform: rotate(180deg); }   /* chevron flips to "open" */
+  #app:not(.collapsed) #side-toggle { display: none; }   /* drawer open → close from the in-panel × */
 
-  /* small viewports: the panel becomes a slide-over drawer above the full-width canvas.
-     Here the whole #side overlay slides (it's a fixed-width box, not a grid track), so we
-     cancel the inner .side-scroll transform the wide layout uses. */
-  @media (max-width: 760px) {
-    #app, #app.collapsed { grid-template-columns: 1fr; }
-    #side {
-      position: absolute; top: 0; right: 0; bottom: 0;
-      width: min(330px, 88vw); z-index: 4;
-      box-shadow: -18px 0 44px rgba(0,0,0,0.5);
-      transform: translateX(0); transition: transform .28s ease;
-    }
-    #app.collapsed #side { transform: translateX(100%); }
-    #app.collapsed .side-scroll { transform: none; }
-    .side-scroll { width: 100%; padding-top: 56px; }   /* clear the toggle button (top:14 + 32) */
+  /* drawer header — carries the close affordance INSIDE the panel so the floating
+     toggle never overlaps content */
+  .drawer-head {
+    display: flex; align-items: center; justify-content: space-between;
+    flex: 0 0 auto; padding: 13px 14px 13px 18px;
+    border-bottom: 1px solid var(--line);
   }
+  .drawer-title {
+    font-size: 10.5px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-faint); font-weight: 600;
+  }
+  #drawer-close {
+    width: 32px; height: 32px; padding: 0; flex: 0 0 auto;
+    display: grid; place-items: center;
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-radius: 9px; color: var(--ink-dim); cursor: pointer;
+    transition: border-color .12s, color .12s;
+  }
+  #drawer-close:hover { border-color: var(--ink-faint); color: var(--ink); }
+  #drawer-close svg { width: 15px; height: 15px; }
+
   @media (prefers-reduced-motion: reduce) {
-    #app, .side-scroll, #side-toggle svg { transition: none; }
+    #side, #side-toggle svg { transition: none; }
   }
 
   .group { margin-bottom: 22px; }
@@ -146,6 +159,9 @@
   }
   button:hover, select:hover { border-color: var(--ink-faint); }
   button:active { transform: translateY(1px); }
+  button:disabled { opacity: 0.4; cursor: default; }
+  button:disabled:hover { border-color: var(--line); }
+  button:disabled:active { transform: none; }
   button.primary { background: var(--accent); color: #062420; border-color: transparent; font-weight: 600; }
   button.primary:hover { filter: brightness(1.06); }
   button.ghost.active { border-color: var(--accent); color: var(--accent); }
@@ -224,6 +240,12 @@
   </div>
 
   <aside id="side">
+   <div class="drawer-head">
+     <span class="drawer-title">Controls</span>
+     <button id="drawer-close" type="button" title="Close panel" aria-label="Close panel">
+       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="6" x2="18" y2="18"></line><line x1="6" y1="18" x2="18" y2="6"></line></svg>
+     </button>
+   </div>
    <div class="side-scroll">
     <div class="group">
       <div class="label">Layout engine</div>
@@ -246,8 +268,8 @@
       <div class="seg cols2">
         <button id="btn-play" class="primary">▶ Play</button>
         <button id="btn-step">Step</button>
-        <button id="btn-reset">Reshuffle</button>
-        <button id="btn-restart">Re-solve</button>
+        <button id="btn-reset" title="Scatter to fresh random positions (and rebuild the graph) and solve">Reshuffle</button>
+        <button id="btn-restart" title="Run the solver again from the current layout">Re-solve</button>
       </div>
       <div class="row">
         <label>Speed</label>
@@ -457,13 +479,32 @@ const LayoutEngine = {
   },
 };
 
-/* --- Force-directed: Fruchterman–Reingold with cooling + center gravity --- */
+/* --- Force-directed: Fruchterman–Reingold with cooling + center gravity ---
+   The original integrator stepped every node a fixed temp-sized jump along its net force,
+   all at once (synchronous/Jacobi). Near equilibrium that overshoots in lock-step, so the
+   whole graph flip-flopped between two mirror configurations every frame — the "cross-eyed"
+   wobble. Two standard descent-stabilizers tame it, and the cooling schedule is unchanged
+   in spirit (it still decides termination):
+     • velocity as an exponential moving average of the force (DAMP) — an overshoot's
+       reversed force is averaged in gradually, so the velocity eases through zero instead
+       of slamming back; the EMA has unity DC gain, so velocity → 0 at equilibrium;
+     • a learning rate LR < 1 on the step — keeps a stiff spring in the monotone-decay
+       regime rather than the overshoot-oscillation one, so the residual jitter dies out.
+   Cooling is *slow* (temp *= 0.99) so the damped dynamics always reach equilibrium before
+   temp bottoms out — then `done` (temp < 0.35) reflects a genuinely settled layout, instead
+   of freezing one mid-solve that then creeps further on the next Re-solve. */
 LayoutEngine.register("force", (graph, bounds, params) => {
   const { nodes, edges } = graph;
   const W = bounds.x1 - bounds.x0, H = bounds.y1 - bounds.y0;
   const area = W * H;
-  let temp = Math.min(W, H) * 0.18;       // initial max displacement
+  let temp = Math.min(W, H) * 0.18;       // cooling cap on per-step travel
   let iter = 0;
+
+  const DAMP = 0.9;         // velocity-EMA memory: higher = smoother/slower, more damping
+  const LR = 0.6;           // step fraction along the velocity — <1 keeps a stiff spring in
+                            // the monotone-decay regime instead of the overshoot-oscillation one
+
+  for (const n of nodes) { n.vx = 0; n.vy = 0; }   // fresh velocities (also after Re-solve)
 
   const ideal = () => Math.sqrt(area / Math.max(1, nodes.length)) * (params.spacing ?? 0.62);
 
@@ -508,17 +549,24 @@ LayoutEngine.register("force", (graph, bounds, params) => {
         n._dx += (cx - n.x) * grav;
         n._dy += (cy - n.y) * grav;
       }
-      // integrate with temperature cap
+      // integrate: smooth each node's net force into a velocity (an exponential moving
+      // average — DAMP is the memory), then step along it (LR < 1), clamped by the cooling
+      // temp. The smoothing removes the cross-eyed wobble: when a node overshoots and its
+      // force reverses, the averaged velocity eases through zero instead of slamming straight
+      // back, so the period-2 flip-flop decays away. The EMA has unity DC gain, so at
+      // equilibrium the velocity decays to zero on its own — slow cooling leaves time for
+      // that to happen before temp bottoms out, so `done` (temp < 0.35) is a settled layout.
       for (const n of nodes) {
-        if (n.fixed) continue;
-        const d = Math.hypot(n._dx, n._dy) || 0.01;
-        const s = Math.min(d, temp) / d;
-        n.x += n._dx * s;
-        n.y += n._dy * s;
-        n.x = Geo.clamp(n.x, bounds.x0, bounds.x1);
-        n.y = Geo.clamp(n.y, bounds.y0, bounds.y1);
+        if (n.fixed) { n.vx = 0; n.vy = 0; continue; }   // a dragged node carries no momentum
+        n.vx = n.vx * DAMP + n._dx * (1 - DAMP);
+        n.vy = n.vy * DAMP + n._dy * (1 - DAMP);
+        const speed = Math.hypot(n.vx, n.vy) || 1e-9;
+        const move = Math.min(speed * LR, temp);         // temp caps the actual travel
+        n.x = Geo.clamp(n.x + n.vx / speed * move, bounds.x0, bounds.x1);
+        n.y = Geo.clamp(n.y + n.vy / speed * move, bounds.y0, bounds.y1);
       }
-      temp *= 0.985;                          // cool
+      temp *= 0.99;                           // cool (slow: leave the damped+LR dynamics time
+                                              // to reach equilibrium before the freeze)
     },
   };
 });
@@ -1131,7 +1179,6 @@ const App = (() => {
   // frame. These flags drive that: geometry changes set both via recompute(); UI controls
   // that change the picture or the cost call invalidate().
   let _redrawStatic = true, _metricsDirty = true, _glowDrawn = false;
-  let _panelAnimUntil = 0;                 // re-fit the canvas each frame until this timestamp
   function invalidate() { _sig = null; _redrawStatic = true; _metricsDirty = true; }
   function posSig() {
     const n = state.graph.nodes; let s = 0;
@@ -1184,10 +1231,6 @@ const App = (() => {
   }
 
   function frame() {
-    if (_panelAnimUntil) {                 // panel column is animating → track its width each frame
-      fitCanvas();
-      if (performance.now() > _panelAnimUntil) { _panelAnimUntil = 0; resize(); }   // settle: bounds + re-route once
-    }
     if (state.running && state.solver) {
       // accumulate fractional rate so speeds below 1 step/frame animate slowly
       state._accum += state.speedRate;
@@ -1225,9 +1268,34 @@ const App = (() => {
 
   function setRunning(on) {
     state.running = on;
-    const b = document.getElementById("btn-play");
-    b.textContent = on ? "❚❚ Pause" : "▶ Play";
-    b.classList.toggle("primary", !on);
+    refreshControls();
+  }
+
+  // Reflect the solver lifecycle in the controls: the primary button is Play / Pause while
+  // there's solving left to do and becomes Replay once the solver has converged (so it's
+  // never a no-op); Step is disabled when there's nothing left to advance.
+  function refreshControls() {
+    const done = !!(state.solver && state.solver.done);
+    const play = document.getElementById("btn-play");
+    if (state.running)   { play.textContent = "❚❚ Pause";  play.classList.remove("primary"); }
+    else if (done)       { play.textContent = "↻ Replay";  play.classList.add("primary"); }
+    else                 { play.textContent = "▶ Play";    play.classList.add("primary"); }
+    document.getElementById("btn-step").disabled = done;
+  }
+
+  // Primary button: mid-solve it toggles run/pause; once converged it replays.
+  function playPause() {
+    if (state.solver && state.solver.done) replaySolve();
+    else setRunning(!state.running);
+  }
+  function stepOnce() {
+    if (state.solver && !state.solver.done) { state.solver.step(); refreshControls(); }
+  }
+  // Replay (the done-state Play): fresh random positions on the CURRENT graph, then solve.
+  // Distinct from Reshuffle (also rebuilds the graph — new topology for the random sources)
+  // and Re-solve (keeps the current positions, just re-runs the solver).
+  function replaySolve() {
+    seedPositions(state.graph, state.bounds); buildSolver(); setRunning(true);
   }
 
   /* -------- interaction: drag nodes -------- */
@@ -1269,6 +1337,7 @@ const App = (() => {
         if (prefer.solver) {
           state.solverName = prefer.solver;
           document.getElementById("sel-solver").value = prefer.solver;
+          setSolverSpeed(prefer.solver);
         }
         if (prefer.routing) {
           state.opts.routing = prefer.routing;
@@ -1284,17 +1353,14 @@ const App = (() => {
     });
 
     document.getElementById("sel-solver").addEventListener("change", e => {
-      state.solverName = e.target.value; buildSolver(); updateSolverUI(); setRunning(true);
+      state.solverName = e.target.value; setSolverSpeed(e.target.value);
+      buildSolver(); updateSolverUI(); setRunning(true);
     });
 
-    document.getElementById("btn-play").addEventListener("click", () => setRunning(!state.running));
-    document.getElementById("btn-step").addEventListener("click", () => {
-      if (state.solver && !state.solver.done) state.solver.step();
-    });
+    document.getElementById("btn-play").addEventListener("click", playPause);
+    document.getElementById("btn-step").addEventListener("click", stepOnce);
     document.getElementById("btn-reset").addEventListener("click", () => loadGraph(state.presetName, true));
-    document.getElementById("btn-restart").addEventListener("click", () => {
-      seedPositions(state.graph, state.bounds); buildSolver(); setRunning(true);
-    });
+    document.getElementById("btn-restart").addEventListener("click", () => { buildSolver(); setRunning(true); });
 
     const SPEEDS = [0.15, 0.25, 0.4, 0.6, 1, 2, 4, 6, 9, 13, 18, 28, 40];
     const sp = document.getElementById("rng-speed");
@@ -1304,7 +1370,20 @@ const App = (() => {
       document.getElementById("val-speed").textContent = rate < 1 ? rate.toFixed(2) : String(rate);
     };
     sp.addEventListener("input", applySpeed);
-    applySpeed();
+
+    // Each solver runs over a very different step count, so a single global speed makes some
+    // flash by and others crawl. Give each a default pace (SPEEDS index) that makes ITS
+    // motion watchable: force spreads over ~hundreds of damped steps; annealing/hillclimb
+    // take fewer but bigger per-step sweeps; constructive solvers ease into place in ~40.
+    // The slider still overrides — until the next solver switch re-applies its default.
+    const SOLVER_SPEED = { force: 5, annealing: 4, hillclimb: 4, layered: 3, circular: 3 };
+    const setSolverSpeed = name => {
+      const idx = SOLVER_SPEED[name];
+      if (idx === undefined) return;
+      sp.value = String(idx);
+      applySpeed();
+    };
+    setSolverSpeed(state.solverName);   // initial pace for the default solver
 
     document.getElementById("sel-routing").addEventListener("change", e => { state.opts.routing = e.target.value; invalidate(); });
     document.getElementById("tg-hops").addEventListener("change", e => { state.opts.hops = e.target.checked; invalidate(); });
@@ -1333,11 +1412,11 @@ const App = (() => {
       sideToggle.setAttribute("aria-expanded", String(!collapsed));
       sideToggle.title = collapsed ? "Expand panel" : "Collapse panel";
       sideToggle.setAttribute("aria-label", sideToggle.title);
-      // Wide: the grid column animates, so re-fit the canvas each frame (no stretch). Small:
-      // the drawer just overlays a full-width canvas — the stage never resizes, nothing to do.
-      if (!window.matchMedia("(max-width: 760px)").matches) _panelAnimUntil = performance.now() + 340;
+      // The panel overlays a full-width canvas, so toggling it never resizes the stage —
+      // nothing to re-fit.
     }
     sideToggle.addEventListener("click", () => setPanel(!appEl.classList.contains("collapsed")));
+    document.getElementById("drawer-close").addEventListener("click", () => setPanel(true));
     if (window.matchMedia("(max-width: 760px)").matches) setPanel(true);   // start collapsed on small screens
 
     window.addEventListener("resize", () => { resize(); });
@@ -1345,8 +1424,8 @@ const App = (() => {
     // keyboard: space = play/pause, S = single step, R = reshuffle
     window.addEventListener("keydown", e => {
       if (e.target.tagName === "SELECT" || e.target.tagName === "INPUT") return;
-      if (e.code === "Space") { e.preventDefault(); setRunning(!state.running); }
-      else if (e.key === "s" || e.key === "S") { if (state.solver && !state.solver.done) state.solver.step(); }
+      if (e.code === "Space") { e.preventDefault(); playPause(); }
+      else if (e.key === "s" || e.key === "S") { stepOnce(); }
       else if (e.key === "r" || e.key === "R") { loadGraph(state.presetName, true); }
     });
 

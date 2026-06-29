@@ -226,9 +226,20 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   which made hops drift/flip/phantom over curves.) Hops bulge to a consistent side (up;
   right for vertical runs). **Siblings are NOT skipped**: two edges sharing a node only
   fail to cross when drawn straight; curved siblings can bulge across each other and that
-  crossing must get a hop (segInt ignores endpoint-coincident hits, so the shared node
-  never makes a phantom). This is distinct from `Objective.crossings` (chord-based, skips
+  crossing must get a hop. This is distinct from `Objective.crossings` (chord-based, skips
   adjacent), which remains the SA/hillclimb *optimization target*, not what's drawn.
+  - **The engine's segment test is INCLUSIVE of endpoints (`segHit` in `default.js`), NOT
+    the shared `Geo.segInt`.** `Geo.segInt` rejects hits within 0.001 of a segment endpoint
+    so the solver's *center-to-center chord* Objective doesn't read two adjacent chords
+    meeting at a node centre as a crossing. But rendered polylines attach at distinct border
+    **ports**, not a shared centre, so there is no shared-endpoint phantom to suppress — and
+    that rejection was **fatal for curves**: a curve's crossings cluster at its bulge-apex
+    *vertices*, where a hit sits at t≈1/u≈0 of the adjacent segments and got dropped. That
+    made dense curved graphs report far fewer crossings than the identical straight layout
+    (K₆ curved showed ~6 vs straight's 15, with the missing crossings drawing no hops).
+    `segHit` accepts t,u ∈ [0,1] and de-dups hits within ~1px (a vertex crossing is found on
+    the 2–4 segment pairs meeting there). **Do not route the rendering crossing count back
+    through `Geo.segInt`.** Pinned by `test/crossings.test.js` (X = 1, clean fan = 0).
 - **An edge running THROUGH a non-incident node's body counts as a crossing**
   (`Nodes.segHitsBody` — clip the segment to the convex shape, require >3px penetration;
   rect/diamond via half-plane clip, circle via the quadratic). Without it the energy
@@ -243,6 +254,23 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
 ## Solver lineup (the point of the demo)
 
 - `force` — Fruchterman–Reingold force-directed (springs + repulsion + cooling). Physics.
+  - **Damped integrator (do not regress to the fixed-step Jacobi update).** The original
+    moved every node a fixed `temp`-sized jump along its net force, synchronously — near
+    equilibrium that overshoots in lock-step and the whole graph flip-flops between two
+    mirror states every frame (the user's "cross-eyed" wobble). Fixed with two standard
+    descent-stabilizers, leaving the cooling-schedule termination intact: velocity as an
+    **EMA of the force** (`DAMP=0.9`, unity DC gain so velocity→0 at equilibrium), and a
+    **learning rate** `LR=0.6` on the step (`move = min(speed·LR, temp)`) to keep a stiff
+    spring in the monotone-decay regime so the residual jitter dies instead of limit-cycling.
+    Cooling stays **slow** (`temp *= 0.99`) and `done` stays the simple `temp < 0.35`: the
+    damped dynamics reach equilibrium (~iter 120 on the tree) well before temp bottoms out
+    (~iter 590), so the layout is genuinely settled at `done` and a Re-solve barely moves it.
+    Velocities are zeroed on solver creation (so Re-solve from current positions starts clean).
+    **Rejected:** a *velocity/displacement-based early-out* — the per-step travel is capped
+    by `temp`, so a "settled" reading can be a freeze, not convergence (a boundary-jammed
+    node also keeps the velocity high); combined with fast cooling it froze layouts mid-solve
+    and they crept further on each Re-solve. Cutting the tail also makes Pause *harder* to
+    hit, not easier — the run gets shorter in wall-clock. Watchability is a *speed* concern.
 - `annealing` — Simulated Annealing à la Davidson–Harel: minimize a weighted cost
   (crossings + edge length + overlap + border). The headline metaheuristic.
 - `hillclimb` — same neighborhood as SA but greedy (T=0). Shows local-minima trapping.
@@ -314,6 +342,14 @@ approximates it physically; constructive solvers (layered/circular) target struc
 - The Speed slider indexes a `SPEEDS` table; `state.speedRate` is *steps per frame* and
   may be **< 1**. `frame()` accumulates it (`state._accum`) and runs `floor` steps, so the
   low end animates genuinely slowly (down to 0.15 steps/frame).
+- **Per-solver default pace** (`SOLVER_SPEED` in `wire()`): each solver runs over a very
+  different step count (force ~hundreds of damped steps, annealing/hillclimb fewer-but-bigger
+  sweeps ~200, constructive ~40 easing steps), so a single global speed makes some flash by
+  and others crawl. Selecting a solver — via the dropdown OR a graph's `prefer.solver` — sets
+  the slider to that solver's default index so its motion is watchable out of the box. A
+  manual slider change overrides and persists (incl. across Reshuffle/Re-solve) **until the
+  next solver switch**, which re-applies the default. This is the lever for "watchability";
+  do NOT chase it by cutting iteration count (shorter run = *harder* to Pause, not easier).
 
 ## NEXT TASK — long-edge dummy nodes for `layered` (proper Sugiyama)
 
