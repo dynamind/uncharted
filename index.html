@@ -122,7 +122,7 @@
     }
     #app.collapsed #side { transform: translateX(100%); }
     #app.collapsed .side-scroll { transform: none; }
-    .side-scroll { width: 100%; }
+    .side-scroll { width: 100%; padding-top: 56px; }   /* clear the toggle button (top:14 + 32) */
   }
   @media (prefers-reduced-motion: reduce) {
     #app, .side-scroll, #side-toggle svg { transition: none; }
@@ -1078,7 +1078,10 @@ const App = (() => {
     return { x0: pad, y0: pad, x1: state.view.w - pad, y1: state.view.h - pad };
   }
 
-  function resize() {
+  // Match the canvas backing stores to the stage size and repaint. Cheap enough to run
+  // every frame while the panel column animates, so the canvas never CSS-scales (which
+  // would stretch the graph) — it just redraws the existing geometry at the new size.
+  function fitCanvas() {
     const r = stage.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
     state.view = { w: r.width, h: r.height, dpr };
@@ -1086,8 +1089,12 @@ const App = (() => {
     canvas.height = glowCanvas.height = r.height * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     gctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    _redrawStatic = true;                 // backing store was cleared → repaint current geometry
+  }
+  function resize() {
+    fitCanvas();
     state.bounds = bounds();
-    invalidate();                         // canvases were cleared by the resize → repaint static
+    invalidate();                         // bounds changed → also re-route (orthogonal A*) + remetric
   }
 
   function loadGraph(presetName, reseed = true) {
@@ -1124,6 +1131,7 @@ const App = (() => {
   // frame. These flags drive that: geometry changes set both via recompute(); UI controls
   // that change the picture or the cost call invalidate().
   let _redrawStatic = true, _metricsDirty = true, _glowDrawn = false;
+  let _panelAnimUntil = 0;                 // re-fit the canvas each frame until this timestamp
   function invalidate() { _sig = null; _redrawStatic = true; _metricsDirty = true; }
   function posSig() {
     const n = state.graph.nodes; let s = 0;
@@ -1176,6 +1184,10 @@ const App = (() => {
   }
 
   function frame() {
+    if (_panelAnimUntil) {                 // panel column is animating → track its width each frame
+      fitCanvas();
+      if (performance.now() > _panelAnimUntil) { _panelAnimUntil = 0; resize(); }   // settle: bounds + re-route once
+    }
     if (state.running && state.solver) {
       // accumulate fractional rate so speeds below 1 step/frame animate slowly
       state._accum += state.speedRate;
@@ -1321,7 +1333,9 @@ const App = (() => {
       sideToggle.setAttribute("aria-expanded", String(!collapsed));
       sideToggle.title = collapsed ? "Expand panel" : "Collapse panel";
       sideToggle.setAttribute("aria-label", sideToggle.title);
-      setTimeout(resize, 300);     // re-fit the canvas once the column finishes animating
+      // Wide: the grid column animates, so re-fit the canvas each frame (no stretch). Small:
+      // the drawer just overlays a full-width canvas — the stage never resizes, nothing to do.
+      if (!window.matchMedia("(max-width: 760px)").matches) _panelAnimUntil = performance.now() + 340;
     }
     sideToggle.addEventListener("click", () => setPanel(!appEl.classList.contains("collapsed")));
     if (window.matchMedia("(max-width: 760px)").matches) setPanel(true);   // start collapsed on small screens
