@@ -887,13 +887,18 @@ const Renderer = (() => {
   // both comet ends clamped to [0, total]. So the comet grows out of the source at the
   // start and drains into the target at the end — neither end pops/blinks. The head
   // glyph scales with the comet's current length so it fades in and out with the body.
-  const GLOW = { m: 1500, rest: 850, stagger: 150, tail: 0.30, minTail: 22, width: 2.6, blur: 8, head: 2.4 };
+  // The halo is faked with stacked additive strokes (a wide faint pass under a bright
+  // thin core, composited with `lighter`) — NOT ctx.shadowBlur. shadowBlur is a per-draw
+  // GPU Gaussian-blur pass; issuing ~2 of them per edge per frame over a retina-scaled,
+  // full-viewport canvas is the fill-rate that was dropping frames. Plain strokes only
+  // cover their own thin area, so the GPU cost collapses while the look survives.
+  const GLOW = { m: 1500, rest: 850, stagger: 150, tail: 0.30, minTail: 22, width: 2.6, head: 2.4, halo: 3.4 };
+  const GLOW_PASSES = [[GLOW.halo, 0.16], [GLOW.halo*0.5, 0.42], [1, 1]];   // [widthMul, alpha]
   function drawGlow(ctx, geom, now) {
     const color = getCss("--accent"), period = GLOW.m + GLOW.rest;
     ctx.save();
     ctx.globalCompositeOperation = "lighter";
     ctx.lineCap = "round"; ctx.lineJoin = "round";
-    ctx.shadowColor = color; ctx.shadowBlur = GLOW.blur;
     for (let i = 0; i < geom.length; i++) {
       const poly = geom[i].poly;
       let total = 0;
@@ -910,14 +915,19 @@ const Renderer = (() => {
       const hp = sub[sub.length-1];
       const g = ctx.createLinearGradient(sub[0].x, sub[0].y, hp.x, hp.y);
       g.addColorStop(0, rgba(color, 0)); g.addColorStop(0.65, rgba(color, 0.4)); g.addColorStop(1, rgba(color, 1));
-      ctx.strokeStyle = g; ctx.lineWidth = GLOW.width;
-      ctx.beginPath();
-      ctx.moveTo(sub[0].x, sub[0].y);
-      for (let k = 1; k < sub.length; k++) ctx.lineTo(sub[k].x, sub[k].y);
-      ctx.stroke();
-      ctx.fillStyle = color;                                      // bright comet head, scaled as it grows/drains
-      ctx.beginPath(); ctx.arc(hp.x, hp.y, GLOW.head * Math.min(1, (s1 - s0) / tail), 0, Math.PI*2); ctx.fill();
+      ctx.strokeStyle = g;
+      for (const [wm, a] of GLOW_PASSES) {                        // wide-faint → thin-bright halo
+        ctx.globalAlpha = a; ctx.lineWidth = GLOW.width * wm;
+        ctx.beginPath(); ctx.moveTo(sub[0].x, sub[0].y);
+        for (let k = 1; k < sub.length; k++) ctx.lineTo(sub[k].x, sub[k].y);
+        ctx.stroke();
+      }
+      const hr = GLOW.head * Math.min(1, (s1 - s0) / tail);       // head scales as it grows/drains
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.22; ctx.beginPath(); ctx.arc(hp.x, hp.y, hr*2.6, 0, Math.PI*2); ctx.fill();   // soft head halo
+      ctx.globalAlpha = 1;    ctx.beginPath(); ctx.arc(hp.x, hp.y, hr,     0, Math.PI*2); ctx.fill();   // bright core
     }
+    ctx.globalAlpha = 1;
     ctx.restore();
   }
 

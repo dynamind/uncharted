@@ -74,12 +74,17 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   forces a full-scene re-stroke or the per-frame `Objective.full` recompute. Don't move
   the glow back into the static `draw()`, and don't call `cost()`/`updateMetricChips` every
   frame — gate them.
-- **Signal glow** (DISPLAY toggle `tg-glow`, off by default): an animated overlay drawn
-  last in `Renderer.draw`. A glowing comet (bright head + gradient tail) eases along each
-  edge's polyline by arc-length (`subPathByLength`), source→target, then rests, edges
-  staggered so pulses ripple; drawn additively (`lighter`) with shadow-blur. It is a
-  draw-time, time-based effect (clock = `performance.now()` passed as `opts.time`), so it
-  lives in the canvas layer, not the pure `src/` modules. Tunables in the `GLOW` const.
+- **Signal glow** (DISPLAY toggle `tg-glow`, off by default): an animated overlay on the
+  dedicated `#glow-canvas` (`Renderer.drawGlowLayer`, repainted every frame). A glowing
+  comet (bright head + gradient tail) eases along each edge's polyline by arc-length
+  (`subPathByLength`), source→target, then rests, edges staggered so pulses ripple. The
+  head is a virtual position overshooting by one tail length (clamped to the path) so the
+  comet grows out of the source and drains into the target — no pop/blink at either end.
+  Drawn additively (`lighter`); the halo is **stacked strokes** (wide-faint under
+  thin-bright via `GLOW_PASSES`), **not `shadowBlur`** — shadowBlur is a per-draw GPU blur
+  pass and was GPU-bound/dropping frames; don't reintroduce it for anything redrawn every
+  frame. Time-based (clock = `performance.now()`), so it lives in the canvas layer, not the
+  pure `src/` modules. Tunables in the `GLOW` const.
 - **Path engines** live under `src/paths/` (same registry pattern as graph sources).
   A `PathEngine` is `{ id, route(graph, bounds, prev) → Path[] }`; `Path` is
   `{ points, a, b, sides? }` where `points` is the logical spine, length ≥ 2, with the
