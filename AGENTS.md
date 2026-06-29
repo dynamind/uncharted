@@ -107,16 +107,20 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
 - **Shapers** live under `src/shapers/` (same registry pattern). A `Shaper` is a global
   path post-processor `{ id, shape(paths) → paths }` — it sees all paths at once and
   inserts a curve control point that depends on neighbors. `fan` is the curve geometry:
-  one control point per edge (a consistent **C-curve**, never an S), bowing by the
-  **centered fan rank** of the edge's **more-crowded end** — so the busy hub's fan
-  dictates the splay and the quiet end follows. The rank orders a node's incident edges
-  by angle but **rotated to start after the largest angular gap** (the empty wedge
-  behind the fan), so the fan's *center* is the middle of the occupied arc — robust to
-  the ±π wrap, where a naive atan2 median picks the wrong center. Edges bordering the
-  gap are the extremes (max bow); dead-center runs straight; everything off-center bows;
-  a fully isolated edge gets a gentle base bow. This replaced the **index-parity** sign (siblings curved together and
-  crossed — issue #1) after two rejected variants: per-end leans that *averaged* to a
-  lopsided straight edge beside a bulging sibling, and per-end leans driving a *cubic*
+  one control point per edge (a consistent **C-curve**, never an S). Each end "votes" on
+  the bow direction (by its **centered fan rank**) to splay its own fan; the vote is
+  resolved **by strength — the end with the larger |rank| (further from its fan center)
+  wins**, since a fan-middle (rank 0) or leaf end has no real claim. So an edge runs
+  straight only when NEITHER end wants a bow (a genuine symmetric center), not merely
+  because its busier end is a middle. The rank orders a node's incident edges by angle
+  but **rotated to start after the largest angular gap** (the empty wedge behind the
+  fan), so the fan's *center* is the middle of the occupied arc — robust to the ±π wrap,
+  where a naive atan2 median picks the wrong center. Edges bordering the gap are the
+  extremes (max bow); a fully isolated edge gets a gentle base bow. This replaced the
+  **index-parity** sign (siblings curved together and crossed — issue #1) after several
+  rejected vote-resolutions: *averaging* (cancels opposing votes to a lopsided straight),
+  *more-crowded-end-wins* (ignored the other end's stronger claim → still straight on a
+  flowchart), and per-end leans driving a *cubic*
   that S-curved when the two ends disagreed. A routing *mode* is a
   (PathEngine, [Shaper], Renderer) chain (`ROUTING` in router.js): straight =
   (direct, –, straight), curved = (direct, fan, curved), orthogonal = (orthogonal, –,

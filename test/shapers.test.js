@@ -62,4 +62,20 @@ describe("fan shaper — geometry-aware bulge avoids sibling crossings", () => {
     expect(d1).toBeGreaterThan(3);           // the two extremes bow
     expect(d3).toBeGreaterThan(3);
   });
+
+  // Opposing votes: an edge that is the MIDDLE of its busy end's fan (rank 0) but an
+  // OUTER member at its other end must still bow — the end with the stronger claim wins,
+  // so it doesn't run straight just because its busier end has no opinion (the flowchart
+  // bug). H fans to three leaves (H→M is dead-centre at H); M also has a second edge, so
+  // H→M is an outer member at M.
+  it("a fan-middle edge still bows when its other end is an outer fan member", () => {
+    const H = { x: 300, y: 100, id: 0 };
+    const L = { x: 150, y: 300, id: 1 }, M = { x: 300, y: 300, id: 2 }, R = { x: 450, y: 300, id: 3 };
+    const X = { x: 540, y: 300, id: 4 };                       // gives M a second edge (M→X)
+    const geom = edgeGeometry(
+      { nodes: [H, L, M, R, X], edges: [[0,1],[0,2],[0,3],[2,4]].map(([s,t]) => ({ source: s, target: t })) },
+      "curved", bounds);
+    expect(eng.crossings(geom).length).toBe(0);
+    expect(midDeflection(geom[1].poly)).toBeGreaterThan(3);    // H→M bows (M's outer vote wins), not straight
+  });
 });

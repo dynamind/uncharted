@@ -36,13 +36,18 @@ function rankPaths(paths) {
   return rank;
 }
 
-// The bow comes from the MORE-crowded end's fan rank (ties → source): that hub's fan
-// dictates the splay, and the quieter end just follows. A leaf end contributes nothing;
-// an edge isolated at both ends gets a gentle base bow.
+// One control point can only bow one way, but each end "votes" on which way (to splay
+// its own fan). Resolve the vote by STRENGTH: the end where this edge sits further from
+// its fan center (larger |rank|) needs the bend more and wins; a fan-middle (rank 0) or
+// leaf end has no opinion and yields. So an edge runs straight only when NEITHER end
+// wants a bow (a genuine symmetric center) — not merely because its busier end happens
+// to be a middle. (Averaging the votes cancels opposing ones to a lopsided straight;
+// taking the more-crowded end ignored the other end's stronger claim. Ties — both ends
+// outer but opposing — are the one case a single curve can't satisfy; source wins.)
 function lean(s, t) {
   if (s.k === 1 && t.k === 1) return BASE;
-  if (s.k >= t.k) return s.k > 1 ? s.r : 0;
-  return t.k > 1 ? t.r : 0;
+  const rs = s.k > 1 ? s.r : 0, rt = t.k > 1 ? t.r : 0;
+  return Math.abs(rs) >= Math.abs(rt) ? rs : rt;
 }
 
 // Fan-order curve shaping. One control point per edge → a consistent C-curve (never an
