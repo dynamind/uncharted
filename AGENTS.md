@@ -74,6 +74,16 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   and it carries `sides` for hysteresis). A routing *mode* = a (PathEngine, flatten)
   pair; **curvature is a flatten/render concern, not a path concern**, so straight and
   curved share the `direct` spine and differ only in flattening.
+- **Ports** live under `src/ports/` (registry keyed by node shape). A `PortStrategy` is
+  `{ shape, assign(node, incident) → Point[] }`: it places a node's incident-edge ports
+  on the border. The `direct` PathEngine groups each node's incident edges and calls
+  `getPortStrategy(node.shape)`. **Only the `default` strategy is registered** — one port
+  per edge toward the far node (`Nodes.boundary`, which already snaps correctly for
+  circle/rect/diamond). Spreading siblings across a face (the orthogonal PHASE-2 look)
+  was tried for straight/curved and **deliberately dropped**: it reads mechanical on
+  organic edges. Sibling crossings are reduced by the curve's geometry-aware bulge, not
+  by separating attach points. The registry is the seam to drop in an opt-in spreading
+  (or other shape-specific) strategy later; orthogonal keeps its own internal spreading.
 - **Arrow-flip fix (resolved):** the curved flatten samples the bézier **between the
   border ports**, not between node centres — so every sample lies outside both node
   bodies and the arrowhead's base-finding walk always steps outward. Previously the
