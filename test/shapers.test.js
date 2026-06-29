@@ -47,9 +47,9 @@ describe("fan shaper — geometry-aware bulge avoids sibling crossings", () => {
     expect(Math.hypot(m0.x - m1.x, m0.y - m1.y)).toBeGreaterThan(3);
   });
 
-  // The fan centre is the middle of the occupied arc (opposite the largest gap), not
-  // the median by atan2 — so a fan straddling the ±π seam still centres correctly.
-  it("a left-pointing fan straddling ±π centres on the dead-centre edge", () => {
+  // The fan center is the middle of the occupied arc (opposite the largest gap), not
+  // the median by atan2 — so a fan straddling the ±π seam still centers correctly.
+  it("a left-pointing fan straddling ±π centers on the dead-center edge", () => {
     const A = { x: 400, y: 300, id: 0 };
     const T1 = { x: 100, y: 200, id: 1 };   // up-left   (~ -161°)
     const T2 = { x: 100, y: 300, id: 2 };   // dead-left ( 180°)
@@ -58,7 +58,7 @@ describe("fan shaper — geometry-aware bulge avoids sibling crossings", () => {
       "curved", bounds);
     expect(eng.crossings(geom).length).toBe(0);
     const [d1, d2, d3] = geom.map(g => midDeflection(g.poly));
-    expect(d2).toBeLessThan(2);              // dead-left edge runs ~straight (fan centre)
+    expect(d2).toBeLessThan(2);              // dead-left edge runs ~straight (fan center)
     expect(d1).toBeGreaterThan(3);           // the two extremes bow
     expect(d3).toBeGreaterThan(3);
   });

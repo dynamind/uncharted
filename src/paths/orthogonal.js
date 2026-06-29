@@ -2,7 +2,7 @@ import { orthogonalGeometry } from "../router.js";
 import { registerPathEngine } from "./registry.js";
 
 // Orthogonal routing is inherently global: grid A* around node obstacles (+margin),
-// per-edge side selection by bend-minimisation with hysteresis, and channel
+// per-edge side selection by bend-minimization with hysteresis, and channel
 // separation across all edges. It therefore routes the whole graph at once. Its
 // polyline IS the logical spine — axis-aligned bends already terminating on
 // node-border ports — so we pass the points through unflattened. `sides` carries

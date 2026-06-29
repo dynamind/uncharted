@@ -6,7 +6,7 @@ const SAMPLES = 18;        // bézier samples per curved edge
 // Sample a quadratic bézier to a polyline. The fan shaper hands us a 3-point spine
 // [p0, control, p1] whose control point bows the curve so siblings splay apart (see
 // shapers/fan.js). The endpoints are border ports, so the whole curve lies outside
-// both node bodies (no centre-anchored samples → no arrowhead flip).
+// both node bodies (no center-anchored samples → no arrowhead flip).
 //
 // If a bare 2-point spine arrives (shaper bypassed), fall back to a gentle consistent
 // perpendicular bulge so it still reads as curved; an orthogonal/hand-edited spine with

@@ -5,10 +5,10 @@ const BASE = 1;                            // gentle consistent bow for a fully 
 
 // Centered fan rank of every path at every node. Incident paths are sorted by the
 // angle to their far node, then the order is rotated to START right after the LARGEST
-// angular gap — the empty wedge "behind" the fan. That makes the fan's centre the
+// angular gap — the empty wedge "behind" the fan. That makes the fan's center the
 // middle of the occupied arc (robust to the ±π wrap, where a naive atan2 sort would
-// pick the wrong centre), so the two edges bordering the gap are the extremes and the
-// dead-centre edge runs straight. rank ∈ [-1, 1] across the arc; k = paths at the node.
+// pick the wrong center), so the two edges bordering the gap are the extremes and the
+// dead-center edge runs straight. rank ∈ [-1, 1] across the arc; k = paths at the node.
 function rankPaths(paths) {
   const byNode = new Map();
   const add = (node, far, pi, end) => {

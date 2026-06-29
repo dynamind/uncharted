@@ -8,7 +8,7 @@ register({
   prefer: { solver: "layered", routing: "orthogonal", arrows: true },
   build() {
     const defs = [
-      ["Start","rect"], ["Receive\nrequest","rect"], ["Authorised?","diamond"],
+      ["Start","rect"], ["Receive\nrequest","rect"], ["Authorized?","diamond"],
       ["Reject","rect"], ["Parse body","rect"], ["Valid?","diamond"],
       ["Process","rect"], ["Error","rect"], ["Respond","rect"], ["End","rect"],
     ];

@@ -12,7 +12,7 @@ describe("ports — single attach point toward the target (no spread)", () => {
   const B = { x: 300, y: 300, w: 120, h: 60, shape: "rect", id: 0 };
   const T = [{ x: 200, y: 520, id: 1 }, { x: 300, y: 520, id: 2 }, { x: 400, y: 520, id: 3 }];
 
-  it("a box edge attaches where the centre→target ray crosses the face", () => {
+  it("a box edge attaches where the center→target ray crosses the face", () => {
     const graph = { nodes: [B, T[1]], edges: [{ source: 0, target: 1 }] };
     const p = edgeGeometry(graph, "straight", bounds)[0].poly[0];
     const exp = Nodes.boundary(B, T[1].x, T[1].y);

@@ -85,12 +85,12 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   by separating attach points. The registry is the seam to drop in an opt-in spreading
   (or other shape-specific) strategy later; orthogonal keeps its own internal spreading.
 - **Arrow-flip fix (resolved):** the curved flatten samples the bézier **between the
-  border ports**, not between node centres — so every sample lies outside both node
+  border ports**, not between node centers — so every sample lies outside both node
   bodies and the arrowhead's base-finding walk always steps outward. Previously the
-  curve ran centre-to-centre with only the endpoints snapped, leaving interior samples
+  curve ran center-to-center with only the endpoints snapped, leaving interior samples
   *inside* box/diamond bodies, which flipped the arrowhead 180° for edges shorter than
   ~12× the border half-extent. Circles were immune (R=8). Don't reintroduce
-  centre-anchored curve sampling.
+  center-anchored curve sampling.
 - **Renderers** live under `src/renderers/` (same registry pattern). A `Renderer` is
   `{ id, render(path, ctx) → { poly, tangents } }`: it flattens a Path into the drawn
   polyline plus per-vertex unit tangents (so the arrow/crossing engines read true
@@ -100,14 +100,14 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   The old vestigial `SAMPLES` in index.html's canvas Renderer was dead and removed.
 - **Shapers** live under `src/shapers/` (same registry pattern). A `Shaper` is a global
   path post-processor `{ id, shape(paths) → paths }` — it sees all paths at once and
-  inserts a curve control point that depends on neighbours. `fan` is the curve geometry:
+  inserts a curve control point that depends on neighbors. `fan` is the curve geometry:
   one control point per edge (a consistent **C-curve**, never an S), bowing by the
   **centered fan rank** of the edge's **more-crowded end** — so the busy hub's fan
   dictates the splay and the quiet end follows. The rank orders a node's incident edges
   by angle but **rotated to start after the largest angular gap** (the empty wedge
-  behind the fan), so the fan's *centre* is the middle of the occupied arc — robust to
-  the ±π wrap, where a naive atan2 median picks the wrong centre. Edges bordering the
-  gap are the extremes (max bow); dead-centre runs straight; everything off-centre bows;
+  behind the fan), so the fan's *center* is the middle of the occupied arc — robust to
+  the ±π wrap, where a naive atan2 median picks the wrong center. Edges bordering the
+  gap are the extremes (max bow); dead-center runs straight; everything off-center bows;
   a fully isolated edge gets a gentle base bow. This replaced the **index-parity** sign (siblings curved together and
   crossed — issue #1) after two rejected variants: per-end leans that *averaged* to a
   lopsided straight edge beside a bulging sibling, and per-end leans driving a *cubic*
@@ -121,13 +121,13 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   grid **A\*** (turn-penalised) around node obstacles (+margin), connected via axis-
   aligned **ports** (route between points *outside* the boxes — never let the jog
   happen inside a box, or the endpoint clip turns it into a diagonal). Side choice
-  per edge = **MINIMISE BENDS** over candidate (sourceSide, targetSide) pairs by
+  per edge = **MINIMIZE BENDS** over candidate (sourceSide, targetSide) pairs by
   actually routing them; a bend tie prefers down-flow (target top / vertical).
   - Stacked (boxes vertically separated): try both source exits × both target entries
     → straight trunk when aligned; **1-bend L** "side-of-A → top-of-B" when B is well
     off to the side; **1-bend "bottom-of-A → side-of-B"** when B is mostly below but
     the side→top route is blocked (the flowchart merge: Reject/Error enter Respond's
-    sides). Both ends are bend-minimised, not just the source.
+    sides). Both ends are bend-minimized, not just the source.
   - Level (overlap vertically): side-to-side only — do NOT bend-min into a bottom exit;
     it flips in/out as you drag (looks wrong + jumps).
   - Tight/degenerate (best still >2 bends): all pairs + four **same-side U-turns**
@@ -151,12 +151,12 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
     into parallel tracks: it nudges only **interior** segments (both ends are bends), so the
     PORT endpoints (pinned on the border) never move and the **bend count is unchanged**.
     Horizontal interior segs shift in y, vertical in x — the shift moves only the two shared
-    bend vertices, the perpendicular neighbours grow/shrink, everything stays axis-aligned,
+    bend vertices, the perpendicular neighbors grow/shrink, everything stays axis-aligned,
     and a corner shared by an H and a V interior seg takes an independent y- and x-nudge.
     Segments are grouped by lane (orientation + perp coord within `LANE_TOL`) then by
     overlapping extent; each cluster is spread symmetrically by `LANE_STEP`, ordered by the
-    perpendicular centre of each seg's neighbours so the track arriving from "above" stays
-    above (minimises new crossings). Port stubs — the two end segments of any route, and so
+    perpendicular center of each seg's neighbors so the track arriving from "above" stays
+    above (minimizes new crossings). Port stubs — the two end segments of any route, and so
     every segment of a 0/1-bend route — are NOT separable this way; those are de-collided at
     the ports back in PHASE 2.
   Each result carries its chosen `sides` for testing. Invariant (test/router.test.js):
@@ -166,13 +166,13 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   **Per-side port distribution** (PHASE 2, `offAt` map): the `k` edges sharing a node
   side **divide it into `k+1` even sections**, ports at the interior boundaries, ordered
   by **fan angle** so siblings never cross (your "two lines → thirds" spec). A **straight**
-  edge — one whose target is lined up with the node centre on that side, so it leaves
-  perpendicular (`|axis| < STRAIGHT`) — keeps the **dead centre**, and the rest spread
+  edge — one whose target is lined up with the node center on that side, so it leaves
+  perpendicular (`|axis| < STRAIGHT`) — keeps the **dead center**, and the rest spread
   evenly on each side of it. That's a single geometry-driven rule: when the layered
-  **trunk** toggle aligns the spine, the spine edge IS the straight one → it stays centred
+  **trunk** toggle aligns the spine, the spine edge IS the straight one → it stays centered
   → straight column preserved; with nothing aligned, it's pure even k+1. The router never
   learns about the solver's toggle. (Replaced the old lean + min-SEP packing, which bunched
-  ports near centre instead of dividing the side.)
+  ports near center instead of dividing the side.)
   The attach point's perpendicular coord is the **shape border** (`borderPerp`): rect =
   flat, **diamond = angled face** (tapers to the vertex), circle = round — so a leaning
   port on a decision diamond meets its slanted edge, not the bounding box. Constructive
@@ -211,13 +211,13 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   (crossings + edge length + overlap + border). The headline metaheuristic.
 - `hillclimb` — same neighborhood as SA but greedy (T=0). Shows local-minima trapping.
 - `layered` — Sugiyama-lite: **longest-path layering along edge direction** (sources on
-  top) + barycentre crossing reduction + **priority/median x-alignment** (`alignTo(±1)`).
+  top) + barycenter crossing reduction + **priority/median x-alignment** (`alignTo(±1)`).
   - **Trunk mode** (`params.trunk`, "Straight trunks" toggle, default on): each node's
     *primary child* = the one with the deepest downstream chain; primary parent↔child
     links are hard-aligned (priority 1e6) so the main flow is one straight column and
     branches get shoved to the side. Toggle off = balanced/symmetric (median of all).
-  - Box centres are **snapped to the orthogonal routing lattice** (phase 4) so ports sit
-    dead-centre and aligned chains share an exact column.
+  - Box centers are **snapped to the orthogonal routing lattice** (phase 4) so ports sit
+    dead-center and aligned chains share an exact column.
   The Dagre/ELK analogue. Pair with orthogonal routing for the flowchart.
 - `circular` — nodes on a ring; baseline + reorder. Cheap contrast.
 
@@ -257,7 +257,7 @@ approximates it physically; constructive solvers (layered/circular) target struc
   tunable cost-weight + cooling sliders; per-solver explainer; node dragging; keyboard
   (space/S/R); 9 presets (incl. `spindle` — the fan-out/fan-in port-distribution fixture).
   Verified in-browser (Claude Preview), no console errors.
-- **Orthogonal routing is mature** (this is where most recent effort went): bend-minimised
+- **Orthogonal routing is mature** (this is where most recent effort went): bend-minimized
   side choice on BOTH ends, 1-bend L / bottom-to-side, U-turns for tight wedges, fan-order
   ports (no sibling crossings), A* seeded with the stub direction, grid-quantised length
   (no flicker), **hysteresis** (sticky + drag-steerable), and **channel separation**
@@ -288,7 +288,7 @@ target; toggle `tg-arrows`, auto-on for the flowchart). The default **ArrowEngin
 `arrowHeading(poly, source, target, mode, back)` in `router.js` is a thin wrapper over it kept on
 the public surface (`source`/`target` are vestigial). It returns the tip AND base of the glyph;
 `drawArrowhead` just fills the triangle. A regression test sweeps box/diamond targets across
-angle × distance and asserts no flip (it failed 74/96 cases on the old centre-to-centre curve).
+angle × distance and asserts no flip (it failed 74/96 cases on the old center-to-center curve).
 **Defining requirement (learned the hard way over several iterations): BOTH the tip
 and the base must lie ON the drawn line** — otherwise the wide end drifts off the curve. Every
 "derive a direction, then step `back` px along *that*" approach failed this on short/dragged
@@ -308,10 +308,10 @@ The key test sweeps angle × distance × bulge and asserts the base is within 1p
 
 The `layered` solver places a node in one layer per longest-path rank, but an edge that
 spans more than one layer is drawn as a single long line straight across the intervening
-layer(s) — it doesn't route around the nodes there, and barycentre crossing-reduction can't
+layer(s) — it doesn't route around the nodes there, and barycenter crossing-reduction can't
 account for it because there's no vertex to order in the middle layers. Real Sugiyama
 inserts **dummy nodes** on every edge that skips a layer (one per crossed layer), orders
-them in the barycentre phase like real nodes, then routes the edge through their positions
+them in the barycenter phase like real nodes, then routes the edge through their positions
 (and Brandes–Köpf for the x-coords). Add dummy-node insertion to `layered` so long edges
 bend through their layers instead of cutting across, and the crossing count drops.
 

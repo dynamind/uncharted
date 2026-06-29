@@ -49,7 +49,7 @@ export const Nodes = {
     if (n.shape === "rect" || n.shape === "diamond") return { hw: n.w/2, hh: n.h/2 };
     return { hw: this.R, hh: this.R };
   },
-  // point on the node's border along the ray from its centre toward (tx,ty)
+  // point on the node's border along the ray from its center toward (tx,ty)
   boundary(n, tx, ty) {
     const dx = tx - n.x, dy = ty - n.y, L = Math.hypot(dx, dy) || 1;
     const ux = dx/L, uy = dy/L, { hw, hh } = this.half(n);
@@ -170,7 +170,7 @@ export function orthogonalGeometry(graph, bounds, prev) {
 
   const DIRS = [[1,0],[-1,0],[0,1],[0,-1]];
   const dirOf = st => st[0] === 1 ? 0 : st[0] === -1 ? 1 : st[1] === 1 ? 2 : 3;
-  // sd = direction A* "arrives" travelling at the start (the source port's stub
+  // sd = direction A* "arrives" traveling at the start (the source port's stub
   // direction). Without it A* turns freely at the first cell and wastes the stub,
   // adding a bend (e.g. a right-exit then an immediate down = an extra corner).
   function astar(sx, sy, gxc, gyc, sd = -1) {
@@ -284,7 +284,7 @@ export function orthogonalGeometry(graph, bounds, prev) {
     return simplify(poly);
   }
 
-  // PHASE 1 — choose sides per edge by MINIMISING BENDS over the candidate pairs.
+  // PHASE 1 — choose sides per edge by MINIMIZING BENDS over the candidate pairs.
   //   • Stacked (boxes vertically separated): try both source exits × both target
   //     entries. A bend tie prefers top-entry / vertical (down-flow), so we get a
   //     straight trunk when aligned, a 1-bend L "side-of-A → top-of-B" when B is
@@ -342,8 +342,8 @@ export function orthogonalGeometry(graph, bounds, prev) {
   // PHASE 2 — offsets along each chosen side. k edges sharing a side **divide the
   // side into k+1 even sections**, ports at the interior boundaries (fan-ordered so
   // siblings never cross). A "straight" edge — one whose target is lined up with the
-  // node centre on this side, so it would leave perpendicular (axis ≈ 0) — keeps the
-  // CENTRE and the others spread evenly on each side of it; this is what keeps a
+  // node center on this side, so it would leave perpendicular (axis ≈ 0) — keeps the
+  // CENTER and the others spread evenly on each side of it; this is what keeps a
   // layered trunk a dead-straight column (the spine edge is the straight one) without
   // the router needing to know about the solver's trunk toggle. With no straight edge
   // (or a single one), everyone just shares the even k+1 division.
@@ -370,7 +370,7 @@ export function orthogonalGeometry(graph, bounds, prev) {
       arr.sort((p, q) => p.fan - q.fan);                 // fan order ⇒ no self-crossing
       const ti = arr.findIndex(r => Math.abs(r.axis) < STRAIGHT);   // the straight / trunk edge
       if (ti >= 0) {
-        offAt.set(arr[ti].key, 0);                       // trunk pinned dead-centre
+        offAt.set(arr[ti].key, 0);                       // trunk pinned dead-center
         for (let i = 0; i < ti; i++)  offAt.set(arr[i].key, -lim * (ti - i) / (ti + 1));
         for (let i = ti + 1; i < k; i++) offAt.set(arr[i].key, lim * (i - ti) / (k - ti));
       } else {
@@ -403,7 +403,7 @@ export function orthogonalGeometry(graph, bounds, prev) {
 // endpoints (poly[0] / poly[last], pinned on the node border) never move and the
 // bend count is unchanged. A horizontal interior segment is shifted in y, a
 // vertical one in x; the shift moves only the two shared bend vertices, so the
-// perpendicular neighbour segments just grow/shrink and everything stays axis-
+// perpendicular neighbor segments just grow/shrink and everything stays axis-
 // aligned. Shifts compose cleanly: a corner shared by a horizontal and a vertical
 // interior segment gets an independent y- and x-nudge.
 const LANE_TOL = 6;     // segments within this perpendicular gap count as one lane
@@ -416,10 +416,10 @@ export function separateLanes(geoms) {
     for (let i = 1; i < p.length - 2; i++) {
       const a = p[i], b = p[i+1];
       const dx = Math.abs(a.x - b.x), dy = Math.abs(a.y - b.y);
-      if (dy < 1.5 && dx >= 1.5)        // horizontal: lane = y, ordered by neighbour y
+      if (dy < 1.5 && dx >= 1.5)        // horizontal: lane = y, ordered by neighbor y
         H.push({ gi, pi: i, lane: a.y, lo: Math.min(a.x,b.x), hi: Math.max(a.x,b.x),
                  key: p[i-1].y + p[i+2].y });
-      else if (dx < 1.5 && dy >= 1.5)   // vertical: lane = x, ordered by neighbour x
+      else if (dx < 1.5 && dy >= 1.5)   // vertical: lane = x, ordered by neighbor x
         V.push({ gi, pi: i, lane: a.x, lo: Math.min(a.y,b.y), hi: Math.max(a.y,b.y),
                  key: p[i-1].x + p[i+2].x });
     }
@@ -448,8 +448,8 @@ export function separateLanes(geoms) {
         const cluster = band.slice(k, m);
         k = m;
         if (cluster.length < 2) continue;
-        // order by the perpendicular centre of each segment's neighbours so the
-        // track that arrives from "above" stays above — minimises new crossings.
+        // order by the perpendicular center of each segment's neighbors so the
+        // track that arrives from "above" stays above — minimizes new crossings.
         cluster.sort((s, t) => s.key - t.key || s.gi - t.gi);
         const n = cluster.length;
         cluster.forEach((s, idx) => {

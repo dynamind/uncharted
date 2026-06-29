@@ -313,8 +313,8 @@ function seedPositions(graph, bounds) {
 /* ---------------------------------------------------------------------------
    2b. Objective — the combinatorial cost the solvers fight against.
    Everything (the live metric, the hops, and the metaheuristics) reads
-   crossings from here, so the number on screen is the number being optimised.
-   Crossings use straight chords between node centres — the classic
+   crossings from here, so the number on screen is the number being optimized.
+   Crossings use straight chords between node centers — the classic
    straight-line crossing number — while edges are merely *drawn* curved.
    ------------------------------------------------------------------------- */
 const Objective = {
@@ -362,7 +362,7 @@ const Objective = {
     return s;
   },
   // Penalise *deviation* from the ideal length k, not raw length — otherwise the
-  // optimiser just collapses the whole graph toward a point.
+  // optimizer just collapses the whole graph toward a point.
   lengthPenalty(graph, k) {
     let p = 0;
     for (const e of graph.edges) {
@@ -380,8 +380,8 @@ const Objective = {
       }
     return p;
   },
-  // weighted total — what SA/hillclimb minimise. A node-pierce counts as a
-  // crossing (same weight) so the optimiser can't route through a node for free.
+  // weighted total — what SA/hillclimb minimize. A node-pierce counts as a
+  // crossing (same weight) so the optimizer can't route through a node for free.
   full(graph, bounds, w) {
     const k = this.idealK(graph, bounds);
     const cr = this.crossings(graph).length + this.nodePierces(graph);
@@ -453,7 +453,7 @@ LayoutEngine.register("force", (graph, bounds, params) => {
         a._dx -= dx*f; a._dy -= dy*f;
         b._dx += dx*f; b._dy += dy*f;
       }
-      // gravity toward centre keeps the drawing on screen
+      // gravity toward center keeps the drawing on screen
       for (const n of nodes) {
         n._dx += (cx - n.x) * grav;
         n._dy += (cy - n.y) * grav;
@@ -474,7 +474,7 @@ LayoutEngine.register("force", (graph, bounds, params) => {
 });
 
 /* --- Metaheuristics: Simulated Annealing (Davidson–Harel) & Hill Climbing ---
-   Both explore the same neighbourhood — nudge one node by a cooling radius —
+   Both explore the same neighborhood — nudge one node by a cooling radius —
    but annealing sometimes accepts a worse layout (prob e^(-ΔC/T)) to escape
    local minima, while hill climbing never does. Run them on the same graph to
    watch greed get stuck. We evaluate ΔC *locally* (only edges/nodes touching
@@ -639,7 +639,7 @@ function layeredTargets(graph, bounds, params) {
   const order = []; for (let l = 0; l <= maxL; l++) order.push([]);
   for (let i = 0; i < N; i++) order[layer[i]].push(i);
 
-  // 2. crossing reduction — repeated barycentre sweeps, down then up
+  // 2. crossing reduction — repeated barycenter sweeps, down then up
   const posOf = () => { const p = new Array(N);
     order.forEach(a => a.forEach((id, idx) => p[id] = idx)); return p; };
   const bary = (id, nl, p) => { let s = 0, c = 0;
@@ -653,7 +653,7 @@ function layeredTargets(graph, bounds, params) {
   }
 
   // 3. x-coordinate alignment — the PRIORITY / MEDIAN method (à la Dagre). Each
-  //    node is pulled to the MEDIAN of its neighbours in one adjacent layer, and
+  //    node is pulled to the MEDIAN of its neighbors in one adjacent layer, and
   //    higher-degree nodes win ties — so a node sits straight under its parent
   //    instead of being averaged off-axis. This is what removes needless bends:
   //    aligned parent↔child ports let the orthogonal router draw a single line.
@@ -681,7 +681,7 @@ function layeredTargets(graph, bounds, params) {
     for (const u of inAdj[v]) if (primChild[u] === v && depth[u] > bd) { bd = depth[u]; best = u; }
     primParent[v] = best; }
 
-  // align every layer to its neighbours `dl` layers away (-1 = parents above)
+  // align every layer to its neighbors `dl` layers away (-1 = parents above)
   function alignTo(dl) {
     const seq = []; for (let l = 0; l <= maxL; l++) seq.push(l);
     if (dl > 0) seq.reverse();
@@ -697,7 +697,7 @@ function layeredTargets(graph, bounds, params) {
         want[id] = nb.length ? median(nb) : x[id];
         prio[id] = nb.length;
       }
-      // place high-priority nodes first; they may shove lower-priority neighbours
+      // place high-priority nodes first; they may shove lower-priority neighbors
       const byPrio = arr.map((_, i) => i).sort((a, b) => prio[arr[b]] - prio[arr[a]]);
       for (const i of byPrio) {
         const id = arr[i]; let target = want[id];
@@ -725,8 +725,8 @@ function layeredTargets(graph, bounds, params) {
   alignTo(-1);                                          // finish top-down for tidy chains
 
   // 4. coordinate assignment — layer → y; aligned x mapped/scaled into bounds, then
-  //    snapped to the routing lattice so box centres land on grid lines (ports sit
-  //    dead-centre and aligned chains share an exact column → crisp straight edges).
+  //    snapped to the routing lattice so box centers land on grid lines (ports sit
+  //    dead-center and aligned chains share an exact column → crisp straight edges).
   const W = bounds.x1 - bounds.x0, H = bounds.y1 - bounds.y0;
   const cx = (bounds.x0 + bounds.x1) / 2;
   const bx = bounds.x0 - 36, by = bounds.y0 - 36;            // matches orthogonal grid origin
@@ -858,8 +858,8 @@ const Renderer = (() => {
   // consistent side (up, or right for vertical runs) — no upside-down hops.
   //
   // The gap is cut by CUMULATIVE ARC-LENGTH along the whole polyline, not per segment:
-  // we walk to `centre - HOP_R`, draw the bridge, skip any vertices the gap swallows,
-  // and resume at `centre + HOP_R`. (Cutting per segment put the gap mouths past a
+  // we walk to `center - HOP_R`, draw the bridge, skip any vertices the gap swallows,
+  // and resume at `center + HOP_R`. (Cutting per segment put the gap mouths past a
   // segment's ends whenever a crossing landed within HOP_R of a vertex — common on
   // curves' 18 short segments — leaving a backward stub poking into the hop.)
   function drawPolyWithHops(ctx, poly, pts) {
@@ -1177,11 +1177,11 @@ const App = (() => {
     hillclimb: "The same nudges as annealing, but it only ever accepts an " +
            "improvement. Fast — and a vivid demonstration of getting trapped in a " +
            "local minimum. Re-solve to see different traps.",
-    layered: "Sugiyama: layer nodes by longest path, reorder each layer by neighbour " +
-           "barycentre to cut crossings, then align columns so edges run straight. " +
+    layered: "Sugiyama: layer nodes by longest path, reorder each layer by neighbor " +
+           "barycenter to cut crossings, then align columns so edges run straight. " +
            "Pair with Orthogonal routing for a flowchart. The Dagre / ELK family.",
     circular: "Nodes on a ring in BFS order — a cheap baseline. Compare its " +
-           "crossing count against the optimisers on the same graph.",
+           "crossing count against the optimizers on the same graph.",
   };
 
   // Show only the parameters relevant to the active solver + its explainer.

@@ -3,7 +3,7 @@
 
    A Shaper is a global path post-processor: it sees ALL of a graph's paths at once
    and rewrites them, typically inserting a control point so the renderer can draw a
-   curve that accounts for its neighbours.
+   curve that accounts for its neighbors.
      Shaper = { id, shape(paths) => paths }
    This is where cross-edge curve geometry lives (fan splay now; a repulsion
    relaxation could be another shaper later), kept OUT of the per-edge renderer so

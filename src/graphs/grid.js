@@ -1,6 +1,6 @@
 import { register } from "./registry.js";
 
-// w×h 4-neighbour grid lattice.
+// w×h 4-neighbor grid lattice.
 function grid(w = 6, h = 5) {
   const nodes = [], edges = [];
   const idx = (x, y) => y*w + x;

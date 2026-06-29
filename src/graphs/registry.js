@@ -32,7 +32,7 @@ export function graphSources() {
   return sources.slice();
 }
 
-// Look up by id; falls back to the first registered source (matches old behaviour
+// Look up by id; falls back to the first registered source (matches old behavior
 // where an unknown presetName loaded PRESET_LIST[0]).
 export function getGraphSource(id) {
   return byId.get(id) || sources[0];

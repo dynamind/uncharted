@@ -7,7 +7,7 @@
      rendered = { poly, tangents? }            // a RenderedPath
      ctx      = { mode, back }                  // routing mode + glyph length (px)
      Head     = { tx, ty,   // tip (on the border)
-                  bx, by,   // base centre
+                  bx, by,   // base center
                   ux, uy }  // unit heading, base→tip (points into the node)
    Returns null when the edge is shorter than the glyph (skip it).
 

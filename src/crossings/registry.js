@@ -12,7 +12,7 @@
    `geom` is the array of RenderedPaths `{ poly, a, b, ... }`.
 
    NB this is distinct from the solver's Objective.crossings, which is the abstract
-   straight-line crossing NUMBER being optimised (centre-to-centre chords). This
+   straight-line crossing NUMBER being optimized (center-to-center chords). This
    engine is about what is *drawn*.
 
    Pure-state module, no imports — engines self-register at import time.

@@ -265,7 +265,7 @@ describe("segHitsBody — an edge ploughing through a node counts", () => {
   const circle = (x, y) => ({ x, y, shape: "circle" });
   it("a line straight through a node body is a hit; one clearing it is not", () => {
     const n = rect(400, 300);
-    expect(Nodes.segHitsBody(n, 200, 300, 600, 300)).toBe(true);   // dead through the centre
+    expect(Nodes.segHitsBody(n, 200, 300, 600, 300)).toBe(true);   // dead through the center
     expect(Nodes.segHitsBody(n, 200, 100, 600, 100)).toBe(false);  // well above
   });
   it("ignores a sub-3px corner graze (no false positive)", () => {
@@ -280,13 +280,13 @@ describe("segHitsBody — an edge ploughing through a node counts", () => {
     // has tapered to a sliver there, so the chord only grazes < 3px and misses
     expect(Nodes.segHitsBody(d, 450, 200, 450, 400)).toBe(false);
   });
-  it("circle: a chord through the centre hits, a far miss does not", () => {
+  it("circle: a chord through the center hits, a far miss does not", () => {
     const c = circle(300, 300);
     expect(Nodes.segHitsBody(c, 200, 300, 400, 300)).toBe(true);
     expect(Nodes.segHitsBody(c, 200, 280, 400, 280)).toBe(false);   // > R above
   });
   it("skips the segment's own endpoints' nodes by caller contract (endpoints inside)", () => {
-    // a segment that STARTS at the node centre still reports a hit — callers must
+    // a segment that STARTS at the node center still reports a hit — callers must
     // skip incident nodes themselves (Objective/Renderer do).
     const n = rect(400, 300);
     expect(Nodes.segHitsBody(n, 400, 300, 700, 300)).toBe(true);
@@ -301,7 +301,7 @@ describe("Nodes.inBody — point-in-shape", () => {
     expect(Nodes.inBody(r, 135, 115)).toBe(true);
     expect(Nodes.inBody(r, 145, 100)).toBe(false);                                    // past hw=40
     const d = { x: 100, y: 100, w: 80, h: 40, shape: "diamond" };
-    expect(Nodes.inBody(d, 100, 100)).toBe(true);                                     // centre
+    expect(Nodes.inBody(d, 100, 100)).toBe(true);                                     // center
     expect(Nodes.inBody(d, 138, 118)).toBe(false);                                    // bbox corner, off the face
   });
 });
@@ -335,7 +335,7 @@ describe("arrowHeading is robust near touching / overlapping nodes", () => {
   });
 
   // Regression: the 180° flip on box/diamond targets. The curved bezier used to run
-  // centre-to-centre with only the endpoints snapped, so for edges shorter than
+  // center-to-center with only the endpoints snapped, so for edges shorter than
   // ~12× the border half-extent an interior sample fell INSIDE the box/diamond body
   // and the base-finding walk stepped inward, flipping the arrow to point back out.
   // Circles (R=8) were immune, which is why the sweep above missed it. Paths now
@@ -436,8 +436,8 @@ describe("arrowHeading is robust near touching / overlapping nodes", () => {
   });
 
   it("skips the glyph when the edge is shorter than the arrow", () => {
-    const drawn = (mode, centreGap) => {
-      const n = [{ x: 200, y: 200, id: 0 }, { x: 200 + centreGap, y: 200, id: 1 }];   // circles, R=8
+    const drawn = (mode, centerGap) => {
+      const n = [{ x: 200, y: 200, id: 0 }, { x: 200 + centerGap, y: 200, id: 1 }];   // circles, R=8
       const poly = edgeGeometry({ nodes: n, edges: [{ source: 0, target: 1 }] }, mode,
         { x0: 0, y0: 0, x1: 600, y1: 600 })[0].poly;
       return arrowHeading(poly, n[0], n[1], mode, 11) !== null;
@@ -495,8 +495,8 @@ describe("arrowHeading is robust near touching / overlapping nodes", () => {
 
 // Port distribution: k edges sharing a node side divide it into k+1 even sections
 // (ports at the interior boundaries), EXCEPT a "straight" edge (target lined up with
-// the node centre) keeps dead-centre so a layered trunk stays a straight column.
-describe("per-side port distribution (even k+1 sections, trunk centred)", () => {
+// the node center) keeps dead-center so a layered trunk stays a straight column.
+describe("per-side port distribution (even k+1 sections, trunk centered)", () => {
   const rect = (x, y, w, h = 36) => ({ x, y, w, h, shape: "rect" });
   // ports (entry x) on the hub's TOP, given source x-positions above it
   const topPorts = (hubW, srcXs) => {
@@ -512,14 +512,14 @@ describe("per-side port distribution (even k+1 sections, trunk centred)", () => 
     expect(topPorts(180, [330, 470])).toEqual([370, 430]);
   });
 
-  it("a straight (aligned) edge keeps the centre; siblings spread evenly around it", () => {
-    // middle source sits above the hub centre ⇒ that edge is the trunk ⇒ stays at 400
+  it("a straight (aligned) edge keeps the center; siblings spread evenly around it", () => {
+    // middle source sits above the hub center ⇒ that edge is the trunk ⇒ stays at 400
     const ports = topPorts(180, [300, 400, 500]);
-    expect(ports[1]).toBeCloseTo(400, 1);              // trunk dead-centre
+    expect(ports[1]).toBeCloseTo(400, 1);              // trunk dead-center
     expect(ports).toEqual([355, 400, 445]);            // evenly spread
   });
 
-  it("a single edge on a side stays centred", () => {
+  it("a single edge on a side stays centered", () => {
     expect(topPorts(120, [400])).toEqual([400]);
   });
 });
@@ -542,7 +542,7 @@ describe("orthogonal routing invariants", () => {
     const edges = [{ source: 0, target: 1 }, { source: 0, target: 2 }];
     const start = orthogonalGeometry({ nodes, edges }, { x0: 0, y0: 0, x1: 1200, y1: 1200 })[0].poly[0];
     const { hh } = Nodes.half(A);
-    expect(Math.abs(start.x - A.x)).toBeGreaterThan(2);    // leaning (off-centre)
+    expect(Math.abs(start.x - A.x)).toBeGreaterThan(2);    // leaning (off-center)
     expect(Math.abs(start.y - A.y)).toBeLessThan(hh - 1);  // above bbox bottom → angled face
     expect(onBorder(A, start)).toBe(true);
   });
