@@ -334,6 +334,33 @@ describe("arrowHeading is robust near touching / overlapping nodes", () => {
     expect(bad).toEqual([]);
   });
 
+  // Regression: the 180° flip on box/diamond targets. The curved bezier used to run
+  // centre-to-centre with only the endpoints snapped, so for edges shorter than
+  // ~12× the border half-extent an interior sample fell INSIDE the box/diamond body
+  // and the base-finding walk stepped inward, flipping the arrow to point back out.
+  // Circles (R=8) were immune, which is why the sweep above missed it. Paths now
+  // terminate on the border so the curve is sampled port-to-port; assert no flip
+  // across angle × distance for both box shapes, well below the old threshold.
+  it("a curved arrow into a box/diamond target never flips (the reported bug)", () => {
+    const bad = [];
+    for (const shape of ["rect", "diamond"]) {
+      for (let ang = 0; ang < 360; ang += 30) {
+        for (const dist of [350, 250, 150, 90]) {
+          const A = { x: 400 + dist*Math.cos(ang*Math.PI/180),
+                      y: 400 + dist*Math.sin(ang*Math.PI/180), id: 0 };
+          const B = { x: 400, y: 400, w: 80, h: 50, shape, id: 1 };
+          const poly = edgeGeometry({ nodes: [A, B], edges: [{ source: 0, target: 1 }] },
+            "curved", { x0: 0, y0: 0, x1: 800, y1: 800 })[0].poly;
+          const h = arrowHeading(poly, A, B, "curved");
+          if (!h) continue;                                    // too short to draw — fine
+          const inward = h.ux * (B.x - h.tx) + h.uy * (B.y - h.ty) > 0;
+          if (!inward) bad.push({ shape, ang, dist });
+        }
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
   // On a long curved edge the arrow follows the curve (the secant), so it *continues
   // the line* — a small but real offset from the raw chord, not the chord itself.
   it("a long curved arrow follows the curve, not the raw chord", () => {

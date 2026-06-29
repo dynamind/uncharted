@@ -253,9 +253,13 @@ approximates it physically; constructive solvers (layered/circular) target struc
 
 Recent work is all DONE: channel separation (`separateLanes`, PHASE 4), edge-through-node
 counts as a crossing (`segHitsBody`/`nodePierces`), and **arrowheads** (filled triangle at the
-target; toggle `tg-arrows`, auto-on for the flowchart). `arrowHeading(poly, source, target, mode,
-back)` in `router.js` returns the tip AND base of the glyph; `drawArrowhead` just fills the
-triangle. **Defining requirement (learned the hard way over several iterations): BOTH the tip
+target; toggle `tg-arrows`, auto-on for the flowchart). The default **ArrowEngine** lives under
+`src/arrows/` (`arrow(rendered, { mode, back }) → Head | null`, pure geometry, no router cycle);
+`arrowHeading(poly, source, target, mode, back)` in `router.js` is a thin wrapper over it kept on
+the public surface (`source`/`target` are vestigial). It returns the tip AND base of the glyph;
+`drawArrowhead` just fills the triangle. A regression test sweeps box/diamond targets across
+angle × distance and asserts no flip (it failed 74/96 cases on the old centre-to-centre curve).
+**Defining requirement (learned the hard way over several iterations): BOTH the tip
 and the base must lie ON the drawn line** — otherwise the wide end drifts off the curve. Every
 "derive a direction, then step `back` px along *that*" approach failed this on short/dragged
 edges, and angle-vs-chord tests never caught it. So:
