@@ -10,3 +10,4 @@ export { renderers, getRenderer } from "./registry.js";
 
 import "./straight.js";
 import "./curved.js";
+import "./rounded.js";

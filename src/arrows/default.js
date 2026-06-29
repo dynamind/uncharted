@@ -20,7 +20,7 @@ registerArrowEngine({
     const tip = poly[poly.length - 1], first = poly[0];
     if (Math.hypot(tip.x - first.x, tip.y - first.y) < back) return null;   // edge shorter than glyph
     let bx, by;
-    if (mode === "orthogonal") {
+    if (mode === "orthogonal" || mode === "orthogonal-smooth") {
       const prev = poly[poly.length - 2];
       const dx = tip.x - prev.x, dy = tip.y - prev.y, L = Math.hypot(dx, dy);
       if (L < 1e-3) return null;

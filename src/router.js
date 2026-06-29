@@ -486,9 +486,10 @@ export function arrowHeading(poly, source, target, mode, back = 11) {
    render concern, so straight and curved share the `direct` 2-port spine; curved adds
    the `fan` shaper. Orthogonal draws straight through its bend spine. */
 const ROUTING = {
-  straight:   { path: "direct",     render: "straight" },
-  curved:     { path: "direct",     render: "curved", shape: "fan" },
-  orthogonal: { path: "orthogonal", render: "straight" },
+  straight:            { path: "direct",     render: "straight" },
+  curved:              { path: "direct",     render: "curved", shape: "fan" },
+  orthogonal:          { path: "orthogonal", render: "straight" },
+  "orthogonal-smooth": { path: "orthogonal", render: "rounded" },
 };
 
 export function edgeGeometry(graph, mode, bounds, prev) {

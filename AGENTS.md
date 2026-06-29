@@ -103,6 +103,13 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   geometry off the line, not control points). `straight` draws the spine as-is;
   `curved` samples the quadratic the shaper produces through its 3-point `[p0, control,
   p1]` spine (owns `SAMPLES`; a bare 2-point spine falls back to a gentle default bulge).
+  `rounded` is **smooth orthogonal**: it takes the orthogonal bend spine and fillets each
+  interior corner with an 8px quadratic bézier (radius clamped to half the shorter
+  segment), leaving endpoints straight so the arrowhead stays axis-aligned. Routing modes
+  (`ROUTING` in router.js): straight=(direct,straight), curved=(direct,fan,curved),
+  orthogonal=(orthogonal,straight), orthogonal-smooth=(orthogonal,rounded) — the smooth
+  variant reuses the orthogonal PathEngine untouched (hysteresis/`sides`, channel
+  separation, the arrow's axis-aligned branch all apply to it too).
   The old vestigial `SAMPLES` in index.html's canvas Renderer was dead and removed.
 - **Shapers** live under `src/shapers/` (same registry pattern). A `Shaper` is a global
   path post-processor `{ id, shape(paths) → paths }` — it sees all paths at once and

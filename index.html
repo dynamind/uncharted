@@ -257,6 +257,7 @@
           <option value="straight">Straight</option>
           <option value="curved" selected>Curved</option>
           <option value="orthogonal">Orthogonal</option>
+          <option value="orthogonal-smooth">Orthogonal · smooth</option>
         </select>
       </div>
       <label class="toggle"><input type="checkbox" id="tg-hops" checked /><span class="box"></span><span class="t">Crossing hops</span></label>
@@ -1040,11 +1041,12 @@ const App = (() => {
   // Orthogonal A* is heavy to run every frame, so during an energy-based solver's
   // motion we route straight and snap to orthogonal once it settles.
   function activeRouting() {
-    if (state.opts.routing !== "orthogonal") return state.opts.routing;
+    const r = state.opts.routing;
+    if (r !== "orthogonal" && r !== "orthogonal-smooth") return r;
     const heavy = state.solverName === "force" || state.solverName === "annealing"
                || state.solverName === "hillclimb";
-    if (heavy && state.solver && !state.solver.done) return "straight";
-    return "orthogonal";
+    if (heavy && state.solver && !state.solver.done) return "straight";   // A* is heavy mid-motion
+    return r;
   }
 
   let _sig = null;
@@ -1066,7 +1068,8 @@ const App = (() => {
     // the route only changes when a strictly-better one appears, so dragging a box
     // doesn't make edges twitch — and the approach direction picks the side.
     state.geom = edgeGeometry(state.graph, mode, state.bounds, state._prevSides);
-    state._prevSides = mode === "orthogonal" ? state.geom.map(g => g.sides) : null;
+    state._prevSides = (mode === "orthogonal" || mode === "orthogonal-smooth")
+      ? state.geom.map(g => g.sides) : null;
     const cross = getCrossingEngine("default");
     state.crossings = cross.crossings(state.geom);
     state.pierces = cross.pierces(state.geom, state.graph.nodes);
