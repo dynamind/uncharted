@@ -834,11 +834,18 @@ function layeredTargets(graph, bounds, params) {
   for (const v of x) { if (v < minx) minx = v; if (v > maxx) maxx = v; }
   const mid = (minx + maxx) / 2, span = maxx - minx;
   const scale = span > W ? W / span : 1;
+  // Layers get a NATURAL vertical gap (≈ a box plus routing room), shrinking only if the
+  // stack would overflow — symmetric with the x-axis (which only scales down when too wide).
+  // Previously y always divided the FULL height by maxL, so a short DAG (e.g. the 3-layer
+  // fan-out/fan-in) stretched floor-to-ceiling. The stack is then centered vertically.
+  const LAYER_GAP = 96;
+  const gap = maxL === 0 ? 0 : Math.min(LAYER_GAP, H / maxL);
+  const ytop = bounds.y0 + (H - gap * maxL) / 2;
   const t = new Array(N);
   for (let i = 0; i < N; i++) {
     t[i] = {
       x: snap(cx + (x[i] - mid) * scale, bx),
-      y: snap(bounds.y0 + (maxL === 0 ? H/2 : H * layer[i] / maxL), by),
+      y: snap(maxL === 0 ? bounds.y0 + H/2 : ytop + gap * layer[i], by),
     };
   }
   return t;
