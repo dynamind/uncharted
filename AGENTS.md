@@ -95,10 +95,26 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   `{ id, render(path, ctx) → { poly, tangents } }`: it flattens a Path into the drawn
   polyline plus per-vertex unit tangents (so the arrow/crossing engines read true
   geometry off the line, not control points). `straight` draws the spine as-is;
-  `curved` samples the perpendicular-bulge quadratic bézier (owns `SAMPLES`). A
-  routing *mode* = a (PathEngine, Renderer) pair (`ROUTING` in router.js): straight =
-  (direct, straight), curved = (direct, curved), orthogonal = (orthogonal, straight).
+  `curved` samples the quadratic the shaper produces through its 3-point `[p0, control,
+  p1]` spine (owns `SAMPLES`; a bare 2-point spine falls back to a gentle default bulge).
   The old vestigial `SAMPLES` in index.html's canvas Renderer was dead and removed.
+- **Shapers** live under `src/shapers/` (same registry pattern). A `Shaper` is a global
+  path post-processor `{ id, shape(paths) → paths }` — it sees all paths at once and
+  inserts a curve control point that depends on neighbours. `fan` is the curve geometry:
+  one control point per edge (a consistent **C-curve**, never an S), bowing by the
+  **centered fan rank** of the edge's **more-crowded end** — so the busy hub's fan
+  dictates the splay and the quiet end follows. The rank orders a node's incident edges
+  by angle but **rotated to start after the largest angular gap** (the empty wedge
+  behind the fan), so the fan's *centre* is the middle of the occupied arc — robust to
+  the ±π wrap, where a naive atan2 median picks the wrong centre. Edges bordering the
+  gap are the extremes (max bow); dead-centre runs straight; everything off-centre bows;
+  a fully isolated edge gets a gentle base bow. This replaced the **index-parity** sign (siblings curved together and
+  crossed — issue #1) after two rejected variants: per-end leans that *averaged* to a
+  lopsided straight edge beside a bulging sibling, and per-end leans driving a *cubic*
+  that S-curved when the two ends disagreed. A routing *mode* is a
+  (PathEngine, [Shaper], Renderer) chain (`ROUTING` in router.js): straight =
+  (direct, –, straight), curved = (direct, fan, curved), orthogonal = (orthogonal, –,
+  straight). A repulsion relaxation could be added as another shaper later.
 - **Edge routing is separate from solving.** `edgeGeometry(graph, mode, bounds, prev)`
   dispatches via the path + renderer registries and returns per-edge geometry
   `{ poly, tangents, a, b, sides? }`. Modes: `straight | curved | orthogonal`. Orthogonal is

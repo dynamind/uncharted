@@ -452,13 +452,14 @@ describe("arrowHeading is robust near touching / overlapping nodes", () => {
   // of the drawn curve), not from arrowHeading itself. This is what makes the arrow
   // look like the head of the line; a hand-picked angle-vs-chord check never proved it.
   it("curved arrow tracks the curve's true arrival tangent at every angle/length", () => {
-    // mirror edgeGeometry's curved control point → tangent at the target (t=1)
-    const arrivalTangent = (a, b, i) => {
-      const mx = (a.x+b.x)/2, my = (a.y+b.y)/2;
-      const dx = b.x-a.x, dy = b.y-a.y, len = Math.hypot(dx, dy) || 1;
-      const off = Math.min(34, len*0.11) * ((i % 2) ? 1 : -1);
-      const c = { x: mx - dy/len*off, y: my + dx/len*off };
-      const tx = b.x - c.x, ty = b.y - c.y, L = Math.hypot(tx, ty);
+    // The curve's arrival tangent at the target (t=1), recovered from the DRAWN
+    // polyline itself — independent of arrowHeading and of whatever bulge rule the
+    // shaper uses. The poly is a quadratic sampled uniformly, so its midpoint (t=0.5)
+    // gives the control point c = 2·mid − (p0+p1)/2, and the t=1 tangent ∥ (p1 − c).
+    const arrivalTangent = (poly) => {
+      const p0 = poly[0], p1 = poly[poly.length - 1], mid = poly[(poly.length - 1) / 2 | 0];
+      const cx = 2*mid.x - (p0.x + p1.x)/2, cy = 2*mid.y - (p0.y + p1.y)/2;
+      const tx = p1.x - cx, ty = p1.y - cy, L = Math.hypot(tx, ty) || 1;
       return { x: tx/L, y: ty/L };
     };
     const offenders = [];
@@ -475,7 +476,7 @@ describe("arrowHeading is robust near touching / overlapping nodes", () => {
           if (!h) continue;                             // skipped (too short) is fine
           const tip = g.poly[g.poly.length - 1];
           const onBorder = Math.abs(Math.hypot(tip.x - b.x, tip.y - b.y) - Nodes.R) < 1.5;
-          const T = arrivalTangent(a, b, i);
+          const T = arrivalTangent(g.poly);
           const devDeg = Math.acos(Math.max(-1, Math.min(1, h.ux*T.x + h.uy*T.y))) * 180 / Math.PI;
           if (!onBorder || devDeg > 18) offenders.push({ dist, deg, i, devDeg: Math.round(devDeg), onBorder });
         }

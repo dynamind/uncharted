@@ -26,16 +26,16 @@ describe("crossing engine — siblings are not skipped", () => {
     expect(eng.crossings(geom).length).toBe(0);
   });
 
-  it("catches the reported issue: two curved siblings that bulge across each other", () => {
-    // A on top, B below-left, C straight below — the curved bulge swings A→B across
-    // A→C. The old sibling-skip hid this; now it gets a hop.
-    const A = { x: 300, y: 100, id: 0 }, B = { x: 200, y: 420, id: 1 }, C = { x: 300, y: 420, id: 2 };
-    const geom = edgeGeometry({ nodes: [A, B, C], edges: [{ source: 0, target: 1 }, { source: 0, target: 2 }] },
-      "curved", { x0: 0, y0: 0, x1: 600, y1: 600 });
-    const cr = eng.crossings(geom);
-    expect(cr.length).toBeGreaterThan(0);
-    expect(cr.every(c => adjacent(geom[c.eA], geom[c.eB]))).toBe(true);   // all are sibling crossings
+  it("detects a crossing between two independent curved edges (works on curves)", () => {
+    // two non-adjacent edges forming an X — they genuinely cross when drawn curved
+    const A = { x: 100, y: 100, id: 0 }, B = { x: 400, y: 400, id: 1 };
+    const C = { x: 400, y: 100, id: 2 }, D = { x: 100, y: 400, id: 3 };
+    const geom = edgeGeometry({ nodes: [A, B, C, D], edges: [{ source: 0, target: 1 }, { source: 2, target: 3 }] },
+      "curved", { x0: 0, y0: 0, x1: 500, y1: 500 });
+    expect(eng.crossings(geom).length).toBeGreaterThan(0);
   });
+  // (sibling fans that USED to cross are now kept crossing-free by the fan shaper —
+  //  see test/shapers.test.js.)
 });
 
 describe("crossing engine — pierces", () => {

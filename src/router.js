@@ -10,6 +10,7 @@
 // back from here. The cycle is safe: every cross-reference is call-time, never
 // touched while the modules are still loading.
 import { getPathEngine } from "./paths/index.js";
+import { getShaper } from "./shapers/index.js";
 import { getRenderer } from "./renderers/index.js";
 import { getArrowEngine } from "./arrows/index.js";
 
@@ -478,21 +479,22 @@ export function arrowHeading(poly, source, target, mode, back = 11) {
 }
 
 /* ---- routing dispatch (straight | curved | orthogonal) -------------------
-   A routing mode = a (PathEngine, Renderer) pair. The PathEngine produces the
-   logical, border-clipped spine; the Renderer flattens it into the drawn polyline
-   (+ per-vertex tangents). Curvature is a render concern, so straight and curved
-   share the `direct` 2-port spine and differ only in the renderer. Orthogonal
-   draws straight through its bend spine (a rounded-corner renderer could replace
-   that later). */
+   A routing mode = a (PathEngine, [Shaper], Renderer) chain. The PathEngine produces
+   the logical, border-clipped spine; an optional Shaper rewrites the spines as a whole
+   (e.g. fan-order curve control points, which need to see sibling edges); the Renderer
+   flattens each spine into the drawn polyline (+ per-vertex tangents). Curvature is a
+   render concern, so straight and curved share the `direct` 2-port spine; curved adds
+   the `fan` shaper. Orthogonal draws straight through its bend spine. */
 const ROUTING = {
   straight:   { path: "direct",     render: "straight" },
-  curved:     { path: "direct",     render: "curved"   },
+  curved:     { path: "direct",     render: "curved", shape: "fan" },
   orthogonal: { path: "orthogonal", render: "straight" },
 };
 
 export function edgeGeometry(graph, mode, bounds, prev) {
   const cfg = ROUTING[mode] || ROUTING.curved;
-  const paths = getPathEngine(cfg.path).route(graph, bounds, prev);
+  let paths = getPathEngine(cfg.path).route(graph, bounds, prev);
+  if (cfg.shape) { const sh = getShaper(cfg.shape); if (sh) paths = sh.shape(paths); }
   const renderer = getRenderer(cfg.render);
   return paths.map((pth, i) => {
     const { poly, tangents } = renderer.render(pth, { index: i });
