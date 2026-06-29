@@ -299,6 +299,16 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
     branches get shoved to the side. Toggle off = balanced/symmetric (median of all).
   - Box centers are **snapped to the orthogonal routing lattice** (phase 4) so ports sit
     dead-center and aligned chains share an exact column.
+  - **Vertical layer spacing** (`layeredTargets`): layers get a fixed natural gap (≈7 cells),
+    NOT the full bounds height divided by layer count (which stretched a short DAG floor-to-
+    ceiling). Two invariants, both learned from regressions: (1) the gap is a **grid multiple**
+    and only the stack ORIGIN is snapped — snapping each layer independently rounded a non-grid
+    gap to 90 vs 105px depending on window height, giving visibly **unequal** gaps. (2) the gap
+    is **bumped to clear the tallest node** (`2·maxHalfH + 2·margin + 3·cell`): too tight a gap
+    leaves <~45px of vertical channel and the orthogonal router can't run a straight bottom→top
+    edge between layers, so it detours out the side (2-bend `[l,l]`/`[r,r]`). This bit **tall
+    diamonds** hardest (h=56) — at 105px they side-routed; ~120px routes them straight through
+    the top/bottom vertices. Shrink-to-fit (H/maxL) only when the stack would overflow.
   The Dagre/ELK analogue. Pair with orthogonal routing for the flowchart.
 - `circular` — nodes on a ring; baseline + reorder. Cheap contrast.
 

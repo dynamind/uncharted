@@ -837,15 +837,26 @@ function layeredTargets(graph, bounds, params) {
   // Layers get a NATURAL vertical gap (≈ a box plus routing room), shrinking only if the
   // stack would overflow — symmetric with the x-axis (which only scales down when too wide).
   // Previously y always divided the FULL height by maxL, so a short DAG (e.g. the 3-layer
-  // fan-out/fan-in) stretched floor-to-ceiling. The stack is then centered vertically.
-  const LAYER_GAP = 96;
-  const gap = maxL === 0 ? 0 : Math.min(LAYER_GAP, H / maxL);
-  const ytop = bounds.y0 + (H - gap * maxL) / 2;
+  // fan-out/fan-in) stretched floor-to-ceiling. The gap is a GRID MULTIPLE and only the stack
+  // ORIGIN is snapped, so every layer lands on the routing grid AND all gaps are identical —
+  // snapping each layer independently rounded a non-grid gap (96px) to 90 vs 105 depending on
+  // the window height, giving visibly unequal spacing. The stack is centered vertically.
+  const cell = ORTHO.cell;
+  // The gap must clear the TALLEST node plus margins AND leave a routable vertical channel,
+  // or the orthogonal router can't run a straight bottom→top edge between layers and detours
+  // out the side (tall diamonds at a tight gap were the symptom — a ~35px channel forces the
+  // 2-bend fallback; ~50px routes straight). Natural ≈7 cells, bumped for tall nodes, shrunk
+  // only if the stack would overflow; a grid multiple so all gaps stay equal.
+  const maxHalfH = nodes.reduce((m, n) => Math.max(m, Nodes.half(n).hh), 0);
+  const need = 2 * maxHalfH + 2 * ORTHO.margin + 3 * cell;
+  const raw = maxL === 0 ? 0 : Math.min(Math.max(7 * cell, need), H / maxL);
+  const gap = maxL === 0 ? 0 : Math.max(cell, Math.round(raw / cell) * cell);   // grid multiple
+  const ytop = snap(bounds.y0 + (H - gap * maxL) / 2, by);         // snap the ORIGIN once
   const t = new Array(N);
   for (let i = 0; i < N; i++) {
     t[i] = {
       x: snap(cx + (x[i] - mid) * scale, bx),
-      y: snap(maxL === 0 ? bounds.y0 + H/2 : ytop + gap * layer[i], by),
+      y: maxL === 0 ? snap(bounds.y0 + H / 2, by) : ytop + gap * layer[i],   // already on-grid
     };
   }
   return t;
