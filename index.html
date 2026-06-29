@@ -1396,7 +1396,7 @@ const App = (() => {
   canvas.addEventListener("wheel", e => {
     e.preventDefault();
     const s = stagePt(e);
-    if (e.ctrlKey || e.metaKey) zoomAround(s.x, s.y, Math.exp(-e.deltaY * 0.0015));  // pinch / ⌘-scroll
+    if (e.ctrlKey || e.metaKey) zoomAround(s.x, s.y, Math.exp(-e.deltaY * 0.005)); // pinch / ⌘-scroll
     else { state.camera.x -= e.deltaX; state.camera.y -= e.deltaY; }                 // 2-finger pan
     cameraMoved();
   }, { passive: false });
