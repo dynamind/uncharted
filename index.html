@@ -854,40 +854,45 @@ const Renderer = (() => {
   }
 
   // Draw the polyline, lifting into a small semicircular bridge at each crossing.
-  // The bridge sits exactly on the real intersection point and always bulges to
-  // a consistent side (up, or right for vertical runs) — no upside-down hops.
+  // The bridge sits exactly on the real intersection point and always bulges to a
+  // consistent side (up, or right for vertical runs) — no upside-down hops.
+  //
+  // The gap is cut by CUMULATIVE ARC-LENGTH along the whole polyline, not per segment:
+  // we walk to `centre - HOP_R`, draw the bridge, skip any vertices the gap swallows,
+  // and resume at `centre + HOP_R`. (Cutting per segment put the gap mouths past a
+  // segment's ends whenever a crossing landed within HOP_R of a vertex — common on
+  // curves' 18 short segments — leaving a backward stub poking into the hop.)
   function drawPolyWithHops(ctx, poly, pts) {
+    const n = poly.length;
+    const cum = [0];                                   // arc-length at each vertex
+    for (let k = 1; k < n; k++) cum[k] = cum[k-1] + Math.hypot(poly[k].x-poly[k-1].x, poly[k].y-poly[k-1].y);
+
     const bumps = pts.map(pt => {
       let bk = 1, bt = 0, bd = Infinity;
-      for (let k = 1; k < poly.length; k++) {
-        const r = projToSeg(pt, poly[k-1], poly[k]);
-        if (r.d < bd) { bd = r.d; bk = k; bt = r.t; }
-      }
-      return { k: bk, t: bt };
-    }).sort((a, b) => a.k - b.k || a.t - b.t);
-
-    ctx.beginPath();
-    ctx.moveTo(poly[0].x, poly[0].y);
-    let bi = 0;
-    for (let k = 1; k < poly.length; k++) {
-      const q = poly[k-1], p = poly[k];
-      const dx = p.x-q.x, dy = p.y-q.y, L = Math.hypot(dx, dy) || 1;
-      const ux = dx/L, uy = dy/L;
+      for (let k = 1; k < n; k++) { const r = projToSeg(pt, poly[k-1], poly[k]); if (r.d < bd) { bd = r.d; bk = k; bt = r.t; } }
+      const q = poly[bk-1], p = poly[bk];
+      const dx = p.x-q.x, dy = p.y-q.y, L = Math.hypot(dx, dy) || 1, ux = dx/L, uy = dy/L;
       // consistent outward normal: prefer pointing up; for vertical runs, right
       let nx = uy, ny = -ux;
       if (ny > 0.001) { nx = -nx; ny = -ny; }
       else if (Math.abs(ny) <= 0.001 && nx < 0) { nx = -nx; ny = -ny; }
-      const anti = (ux*ny - uy*nx) < 0;
-      while (bi < bumps.length && bumps[bi].k === k) {
-        const b = bumps[bi++];
-        const at = L * b.t;
-        const cx = q.x + ux*at, cy = q.y + uy*at;
-        if (at > HOP_R) ctx.lineTo(cx - ux*HOP_R, cy - uy*HOP_R);
-        ctx.arc(cx, cy, HOP_R, Math.atan2(-uy,-ux), Math.atan2(uy,ux), anti);
-        ctx.moveTo(cx + ux*HOP_R, cy + uy*HOP_R);
-      }
-      ctx.lineTo(p.x, p.y);
+      return { s: cum[bk-1] + L*bt, cx: q.x + ux*L*bt, cy: q.y + uy*L*bt, ux, uy, anti: (ux*ny - uy*nx) < 0 };
+    }).sort((a, b) => a.s - b.s);
+
+    ctx.beginPath();
+    ctx.moveTo(poly[0].x, poly[0].y);
+    let cur = 0, vk = 1;                               // pen arc-length, next vertex to emit
+    for (const b of bumps) {
+      const sBack = b.s - HOP_R, sFwd = b.s + HOP_R;
+      if (sFwd <= cur) continue;                       // already swallowed by an earlier bridge
+      while (vk < n && cum[vk] < sBack) { ctx.lineTo(poly[vk].x, poly[vk].y); vk++; }   // line up to the gap
+      if (sBack > cur) ctx.lineTo(b.cx - b.ux*HOP_R, b.cy - b.uy*HOP_R);                 // ...to the bridge mouth
+      ctx.arc(b.cx, b.cy, HOP_R, Math.atan2(-b.uy,-b.ux), Math.atan2(b.uy,b.ux), b.anti);
+      cur = sFwd;
+      while (vk < n && cum[vk] <= cur) vk++;           // skip vertices under the bridge
     }
+    while (vk < n) { ctx.lineTo(poly[vk].x, poly[vk].y); vk++; }
+    ctx.lineTo(poly[n-1].x, poly[n-1].y);              // always reach the true endpoint
     ctx.stroke();
   }
 
