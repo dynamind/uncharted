@@ -107,20 +107,25 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
 - **Shapers** live under `src/shapers/` (same registry pattern). A `Shaper` is a global
   path post-processor `{ id, shape(paths) → paths }` — it sees all paths at once and
   inserts a curve control point that depends on neighbors. `fan` is the curve geometry:
-  one control point per edge (a consistent **C-curve**, never an S). Each end "votes" on
-  the bow direction (by its **centered fan rank**) to splay its own fan; the vote is
-  resolved **by strength — the end with the larger |rank| (further from its fan center)
-  wins**, since a fan-middle (rank 0) or leaf end has no real claim. So an edge runs
-  straight only when NEITHER end wants a bow (a genuine symmetric center), not merely
-  because its busier end is a middle. The rank orders a node's incident edges by angle
-  but **rotated to start after the largest angular gap** (the empty wedge behind the
-  fan), so the fan's *center* is the middle of the occupied arc — robust to the ±π wrap,
-  where a naive atan2 median picks the wrong center. Edges bordering the gap are the
-  extremes (max bow); a fully isolated edge gets a gentle base bow. This replaced the
-  **index-parity** sign (siblings curved together and crossed — issue #1) after several
-  rejected vote-resolutions: *averaging* (cancels opposing votes to a lopsided straight),
-  *more-crowded-end-wins* (ignored the other end's stronger claim → still straight on a
-  flowchart), and per-end leans driving a *cubic*
+  one control point per edge (a consistent **C-curve**, never an S). A node's incident
+  edges are sorted by angle, rotated to start after the largest gap, then split into
+  **clusters** wherever adjacent edges are >90° apart (`CLUSTER_GAP`); a **centered fan
+  rank** is assigned WITHIN each cluster. Only edges that are actually bunched compete
+  for fan slots — so a node's lone incoming "trunk" (far from its children) is its own
+  singleton cluster and casts no vote, which lets a fan-out node's children **splay to
+  opposite sides** instead of the trunk shoving both the same way. Each end then "votes"
+  by its cluster rank and the vote is resolved **by strength** — larger |rank| wins, a
+  cluster-middle or singleton yields. A winning **target-end** vote is NEGATED (the rank
+  is "outward from the node", which aligns with the source→target perpendicular only at
+  the source; at the target the node faces back along the edge) — without this a fan-IN
+  bows inward and its edges converge and cross; the flip makes fan-in splay outward,
+  mirroring fan-out. An edge runs straight when neither end wants a bow (a symmetric
+  center, or an angularly isolated edge like a straight-through chain link — the preferred
+  spine look); an edge isolated at both ends still gets a gentle base bow.
+  This replaced the **index-parity** sign (issue #1) after several rejected approaches:
+  *averaging* (cancels opposing votes to a lopsided straight), *more-crowded-end-wins*
+  (ignored the other end's claim), ranking the *whole* fan together without clustering
+  (the trunk skewed both children the same way), and per-end leans driving a *cubic*
   that S-curved when the two ends disagreed. A routing *mode* is a
   (PathEngine, [Shaper], Renderer) chain (`ROUTING` in router.js): straight =
   (direct, –, straight), curved = (direct, fan, curved), orthogonal = (orthogonal, –,

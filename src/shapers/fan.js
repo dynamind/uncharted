@@ -2,13 +2,18 @@ import { registerShaper } from "./registry.js";
 
 const MAX_BULGE = 34, BULGE_FRAC = 0.11;   // perpendicular bulge = min(MAX, len*FRAC) * lean
 const BASE = 1;                            // gentle consistent bow for a fully isolated edge
+const CLUSTER_GAP = Math.PI / 2;           // >90° between adjacent edges starts a new cluster
+const TAU = 2 * Math.PI;
 
-// Centered fan rank of every path at every node. Incident paths are sorted by the
-// angle to their far node, then the order is rotated to START right after the LARGEST
-// angular gap — the empty wedge "behind" the fan. That makes the fan's center the
-// middle of the occupied arc (robust to the ±π wrap, where a naive atan2 sort would
-// pick the wrong center), so the two edges bordering the gap are the extremes and the
-// dead-center edge runs straight. rank ∈ [-1, 1] across the arc; k = paths at the node.
+// Fan rank of every path at every node. Incident edges are sorted by the angle to their
+// far node, rotated to start after the LARGEST gap, then split into CLUSTERS wherever
+// adjacent edges are more than CLUSTER_GAP apart. Splay (a centered rank) is assigned
+// WITHIN each cluster — so only edges that are actually bunched compete for fan slots.
+// An angularly isolated edge (e.g. a node's lone incoming "trunk", or a straight-through
+// chain link) is a singleton cluster: rank 0, m 1 → it casts no splay vote and runs
+// straight. This is what lets a fan-out node's two children splay APART instead of the
+// far-away trunk shoving both onto the same side. rank ∈ [-1,1] within the cluster;
+// m = cluster size; k = total edges at the node.
 function rankPaths(paths) {
   const byNode = new Map();
   const add = (node, far, pi, end) => {
@@ -17,10 +22,9 @@ function rankPaths(paths) {
   };
   paths.forEach((p, pi) => { add(p.a, p.b, pi, 0); add(p.b, p.a, pi, 1); });
   const rank = new Map();
-  const TAU = 2 * Math.PI;
   for (const arr of byNode.values()) {
     const k = arr.length;
-    if (k === 1) { rank.set(arr[0].pi + ":" + arr[0].end, { r: 0, k }); continue; }
+    if (k === 1) { rank.set(arr[0].pi + ":" + arr[0].end, { r: 0, m: 1, k }); continue; }
     arr.sort((u, v) => u.ang - v.ang || u.pi - v.pi);
     let start = 0, widest = -Infinity;                 // edge just after the largest gap
     for (let i = 0; i < k; i++) {
@@ -28,26 +32,39 @@ function rankPaths(paths) {
       let gap = arr[next].ang - arr[i].ang; if (gap <= 0) gap += TAU;
       if (gap > widest) { widest = gap; start = next; }
     }
-    for (let j = 0; j < k; j++) {
-      const it = arr[(start + j) % k];
-      rank.set(it.pi + ":" + it.end, { r: -1 + 2*j/(k - 1), k });
+    const seq = Array.from({ length: k }, (_, j) => arr[(start + j) % k]);
+    let lo = 0;                                         // current cluster runs seq[lo..hi-1]
+    for (let hi = 1; hi <= k; hi++) {
+      let split = hi === k;                             // the wrap (largest gap) closes the last cluster
+      if (!split) { let gap = seq[hi].ang - seq[hi-1].ang; if (gap < 0) gap += TAU; split = gap > CLUSTER_GAP; }
+      if (!split) continue;
+      const m = hi - lo;
+      for (let j = lo; j < hi; j++) {
+        const it = seq[j];
+        rank.set(it.pi + ":" + it.end, { r: m === 1 ? 0 : -1 + 2*(j - lo)/(m - 1), m, k });
+      }
+      lo = hi;
     }
   }
   return rank;
 }
 
 // One control point can only bow one way, but each end "votes" on which way (to splay
-// its own fan). Resolve the vote by STRENGTH: the end where this edge sits further from
-// its fan center (larger |rank|) needs the bend more and wins; a fan-middle (rank 0) or
-// leaf end has no opinion and yields. So an edge runs straight only when NEITHER end
-// wants a bow (a genuine symmetric center) — not merely because its busier end happens
-// to be a middle. (Averaging the votes cancels opposing ones to a lopsided straight;
-// taking the more-crowded end ignored the other end's stronger claim. Ties — both ends
-// outer but opposing — are the one case a single curve can't satisfy; source wins.)
+// its own fan cluster). Resolve the vote by STRENGTH: the end where this edge sits
+// further from its cluster center (larger |rank|) needs the bend more and wins. An end
+// in a singleton cluster (isolated edge there) has no opinion and yields; an edge
+// isolated at BOTH ends still gets a gentle base bow, unless it is a genuine fan center
+// (rank 0 in a real cluster), which runs straight.
+//
+// The bow is applied along the source→target chord's perpendicular. A rank is "left of
+// the node looking outward", which aligns with that perpendicular only at the SOURCE
+// end; at the TARGET end the node looks back along target→source, so a target-end win
+// is NEGATED. Without this, a fan-IN bows inward (left-most edge curves right) and its
+// edges converge and cross — flipping makes fan-in splay outward, mirroring fan-out.
 function lean(s, t) {
   if (s.k === 1 && t.k === 1) return BASE;
-  const rs = s.k > 1 ? s.r : 0, rt = t.k > 1 ? t.r : 0;
-  return Math.abs(rs) >= Math.abs(rt) ? rs : rt;
+  const rs = s.m > 1 ? s.r : 0, rt = t.m > 1 ? t.r : 0;
+  return Math.abs(rs) >= Math.abs(rt) ? rs : -rt;
 }
 
 // Fan-order curve shaping. One control point per edge → a consistent C-curve (never an

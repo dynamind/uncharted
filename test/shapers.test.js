@@ -63,19 +63,51 @@ describe("fan shaper — geometry-aware bulge avoids sibling crossings", () => {
     expect(d3).toBeGreaterThan(3);
   });
 
-  // Opposing votes: an edge that is the MIDDLE of its busy end's fan (rank 0) but an
-  // OUTER member at its other end must still bow — the end with the stronger claim wins,
-  // so it doesn't run straight just because its busier end has no opinion (the flowchart
-  // bug). H fans to three leaves (H→M is dead-centre at H); M also has a second edge, so
-  // H→M is an outer member at M.
-  it("a fan-middle edge still bows when its other end is an outer fan member", () => {
-    const H = { x: 300, y: 100, id: 0 };
-    const L = { x: 150, y: 300, id: 1 }, M = { x: 300, y: 300, id: 2 }, R = { x: 450, y: 300, id: 3 };
-    const X = { x: 540, y: 300, id: 4 };                       // gives M a second edge (M→X)
+  // signed side of an edge's bow: which side of its chord the mid sample sits on
+  const bowSide = poly => {
+    const a = poly[0], b = poly[poly.length - 1], m = poly[(poly.length - 1) / 2 | 0];
+    return Math.sign((b.x - a.x) * (m.y - a.y) - (b.y - a.y) * (m.x - a.x));
+  };
+
+  // A fan-out node with an incoming trunk must splay its two children to OPPOSITE sides
+  // — the far-away trunk must not shove both children the same way (the reported bug).
+  // Clustering puts the trunk in its own cluster so the two children splay between
+  // themselves.
+  it("two children of a fan-out splay to opposite sides (trunk doesn't skew them)", () => {
+    const Recv = { x: 300, y: 100, id: 0 }, Auth = { x: 300, y: 320, w: 104, h: 56, shape: "diamond", id: 1 };
+    const Rej = { x: 160, y: 560, id: 2 }, Parse = { x: 340, y: 560, id: 3 };
     const geom = edgeGeometry(
-      { nodes: [H, L, M, R, X], edges: [[0,1],[0,2],[0,3],[2,4]].map(([s,t]) => ({ source: s, target: t })) },
+      { nodes: [Recv, Auth, Rej, Parse], edges: [[0,1],[1,2],[1,3]].map(([s,t]) => ({ source: s, target: t })) },
       "curved", bounds);
     expect(eng.crossings(geom).length).toBe(0);
-    expect(midDeflection(geom[1].poly)).toBeGreaterThan(3);    // H→M bows (M's outer vote wins), not straight
+    const sRej = bowSide(geom[1].poly), sParse = bowSide(geom[2].poly);   // Auth→Rej, Auth→Parse
+    expect(sRej).not.toBe(0);
+    expect(sParse).not.toBe(0);
+    expect(sRej).not.toBe(sParse);                            // opposite sides ⇒ splayed apart
+  });
+
+  // A fan-IN must splay its inbound edges OUTWARD too: the leftmost source's edge should
+  // bend left, the rightmost right (mirror of fan-out). Before the target-end flip the
+  // fan-in bowed inward and its edges converged and crossed.
+  it("a fan-in splays inbound edges outward (leftmost bends left, rightmost right)", () => {
+    const L = { x: 160, y: 120, id: 0 }, M = { x: 340, y: 120, id: 1 }, R = { x: 520, y: 120, id: 2 };
+    const T = { x: 340, y: 380, w: 98, h: 40, shape: "rect", id: 3 }, End = { x: 340, y: 600, id: 4 };
+    const geom = edgeGeometry(
+      { nodes: [L, M, R, T, End], edges: [[0,3],[1,3],[2,3],[3,4]].map(([s,t]) => ({ source: s, target: t })) },
+      "curved", bounds);
+    expect(eng.crossings(geom).length).toBe(0);
+    const bendX = poly => { const a = poly[0], b = poly[poly.length-1], m = poly[(poly.length-1)/2|0]; return m.x - (a.x+b.x)/2; };
+    expect(bendX(geom[0].poly)).toBeLessThan(-2);            // L→T (leftmost) bends LEFT
+    expect(bendX(geom[2].poly)).toBeGreaterThan(2);          // R→T (rightmost) bends RIGHT
+  });
+
+  // An angularly isolated edge (a straight-through chain link: in from above, out below)
+  // casts no fan vote and runs straight — the preferred look for a flowchart spine.
+  it("a straight-through chain link runs straight", () => {
+    const A = { x: 300, y: 100, id: 0 }, B = { x: 300, y: 320, id: 1 }, C = { x: 300, y: 540, id: 2 };
+    const geom = edgeGeometry({ nodes: [A, B, C], edges: [[0,1],[1,2]].map(([s,t]) => ({ source: s, target: t })) },
+      "curved", bounds);
+    expect(midDeflection(geom[0].poly)).toBeLessThan(2);
+    expect(midDeflection(geom[1].poly)).toBeLessThan(2);
   });
 });
