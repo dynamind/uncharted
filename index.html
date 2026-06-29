@@ -873,7 +873,12 @@ const Renderer = (() => {
   // pulses ripple rather than march in lockstep. Drawn additively (`lighter`) with a
   // soft shadow blur over the static edges. m = sweep, n = rest; tail is a fraction of
   // the edge length. `now` is a free-running clock (ms).
-  const GLOW = { m: 1400, rest: 900, stagger: 150, tail: 0.30, minTail: 22, width: 2.6, blur: 8, head: 2.4 };
+  //
+  // The head is a VIRTUAL position that overshoots the path by one tail length, with
+  // both comet ends clamped to [0, total]. So the comet grows out of the source at the
+  // start and drains into the target at the end — neither end pops/blinks. The head
+  // glyph scales with the comet's current length so it fades in and out with the body.
+  const GLOW = { m: 1500, rest: 850, stagger: 150, tail: 0.30, minTail: 22, width: 2.6, blur: 8, head: 2.4 };
   function drawGlow(ctx, geom, now) {
     const color = getCss("--accent"), period = GLOW.m + GLOW.rest;
     ctx.save();
@@ -888,8 +893,10 @@ const Renderer = (() => {
       const local = (now + i*GLOW.stagger) % period;
       if (local >= GLOW.m) continue;                              // resting between sweeps
       const t = local / GLOW.m, p = t < 0.5 ? 2*t*t : 1 - (-2*t+2)*(-2*t+2)/2;   // ease-in-out
-      const head = p * total, tail = Math.max(GLOW.minTail, total * GLOW.tail);
-      const sub = subPathByLength(poly, Math.max(0, head - tail), head);
+      const tail = Math.max(GLOW.minTail, total * GLOW.tail);
+      const q = p * (total + tail);                               // virtual head overshoots by `tail`
+      const s1 = Math.min(total, q), s0 = Math.max(0, q - tail);  // comet ends, clamped to the path
+      const sub = subPathByLength(poly, s0, s1);
       if (!sub) continue;
       const hp = sub[sub.length-1];
       const g = ctx.createLinearGradient(sub[0].x, sub[0].y, hp.x, hp.y);
@@ -899,8 +906,8 @@ const Renderer = (() => {
       ctx.moveTo(sub[0].x, sub[0].y);
       for (let k = 1; k < sub.length; k++) ctx.lineTo(sub[k].x, sub[k].y);
       ctx.stroke();
-      ctx.fillStyle = color;                                      // bright comet head
-      ctx.beginPath(); ctx.arc(hp.x, hp.y, GLOW.head, 0, Math.PI*2); ctx.fill();
+      ctx.fillStyle = color;                                      // bright comet head, scaled as it grows/drains
+      ctx.beginPath(); ctx.arc(hp.x, hp.y, GLOW.head * Math.min(1, (s1 - s0) / tail), 0, Math.PI*2); ctx.fill();
     }
     ctx.restore();
   }
