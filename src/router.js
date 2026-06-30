@@ -149,9 +149,18 @@ class MinHeap {
 // pick a side by the direction they approach from. Tests omit `prev` → pure bend-min.
 export function orthogonalGeometry(graph, bounds, prev) {
   const { nodes, edges } = graph, C = ORTHO;
-  const x0 = bounds.x0 - 36, y0 = bounds.y0 - 36;
-  const cols = Math.ceil((bounds.x1 - x0 + 36) / C.cell) + 1;
-  const rows = Math.ceil((bounds.y1 - y0 + 36) / C.cell) + 1;
+  // The grid must cover every node, not just `bounds` — with no layout container the graph
+  // can extend past bounds (e.g. a tall flowchart in a short window), and A* can't route to a
+  // node that falls outside the grid (its cells get skipped → edges to it detour/break).
+  let minX = bounds.x0, minY = bounds.y0, maxX = bounds.x1, maxY = bounds.y1;
+  for (const n of nodes) {
+    const { hw, hh } = Nodes.half(n);
+    if (n.x - hw < minX) minX = n.x - hw;  if (n.x + hw > maxX) maxX = n.x + hw;
+    if (n.y - hh < minY) minY = n.y - hh;  if (n.y + hh > maxY) maxY = n.y + hh;
+  }
+  const x0 = minX - 36, y0 = minY - 36;
+  const cols = Math.ceil((maxX - x0 + 36) / C.cell) + 1;
+  const rows = Math.ceil((maxY - y0 + 36) / C.cell) + 1;
   const gx = px => Math.round((px - x0) / C.cell);
   const gy = py => Math.round((py - y0) / C.cell);
   const wx = cx => x0 + cx * C.cell, wy = cy => y0 + cy * C.cell;
