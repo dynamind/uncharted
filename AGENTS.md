@@ -102,6 +102,12 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   double-click clears it** to re-frame. The ease has a deadband so it idles (no redraw) once
   converged. `bounds` still exists as the solvers' world-space SCALE reference (idealK, gravity
   center, layer gap, seeding) — it's just no longer a wall and no longer defines the view.
+  **Mobile:** when the open panel covers more than half the viewport (the near-full-screen
+  drawer on a phone) the fit IGNORES it and uses the whole canvas — otherwise the graph squishes
+  into the leftover sliver. And cancel iOS Safari's `gesturestart`/`gesturechange`/`gestureend`
+  (document-level `preventDefault`) + lock the viewport meta (`maximum-scale=1, user-scalable=no`):
+  otherwise a two-finger pinch triggers Safari's own VIEWPORT zoom (scaling the whole page incl.
+  the panel) on top of our canvas pinch. `touch-action:none` on `#canvas` is not enough for that.
 - **Signal glow** (DISPLAY toggle `tg-glow`, off by default): an animated overlay on the
   dedicated `#glow-canvas` (`Renderer.drawGlowLayer`, repainted every frame). A glowing
   comet (bright head + gradient tail) eases along each edge's polyline by arc-length

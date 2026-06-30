@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 <title>Uncharted · graph-layout solver lab</title>
 <style>
   :root {
@@ -1206,7 +1206,11 @@ const App = (() => {
     const bw = Math.max(1, x1 - x0), bh = Math.max(1, y1 - y0);
     const cwx = (x0 + x1) / 2, cwy = (y0 + y1) / 2;            // bbox center, world
     const collapsed = document.getElementById("app").classList.contains("collapsed");
-    const panelW = collapsed ? 0 : state._panelW;             // panel overlays the right
+    // Subtract the open panel so the graph centers in the visible area — but when the panel
+    // covers most of the viewport (mobile, where it's a near-full-screen overlay) ignore it
+    // and fit to the whole canvas, or the graph would squish into the leftover sliver.
+    let panelW = collapsed ? 0 : state._panelW;
+    if (panelW > state.view.w * 0.5) panelW = 0;
     const pad = 56;
     const visW = Math.max(60, state.view.w - panelW - 2 * pad);
     const visH = Math.max(60, state.view.h - 2 * pad);
@@ -1461,6 +1465,12 @@ const App = (() => {
 
   // double-click re-engages auto-fit (re-frames the graph in the visible viewport)
   canvas.addEventListener("dblclick", () => { state.cameraManual = false; });
+
+  // iOS Safari does its own VIEWPORT pinch-zoom on two fingers — scaling the whole page
+  // (panel and all), separate from our canvas pinch and not stopped by touch-action. Cancel
+  // its gesture events so only our camera zoom runs and the layout stays put.
+  ["gesturestart", "gesturechange", "gestureend"].forEach(t =>
+    document.addEventListener(t, e => e.preventDefault(), { passive: false }));
 
   /* -------- UI wiring -------- */
   function wire() {
