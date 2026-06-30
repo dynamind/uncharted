@@ -87,10 +87,21 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
   note below). Gestures (all on `#canvas`, which has `touch-action:none`): wheel = 2-finger
   pan; ctrl/⌘+wheel = zoom about the cursor (trackpad pinch arrives as ctrl+wheel); 1 pointer
   on empty space (or ⌘-over-a-node) = drag-pan; 1 pointer on a node = drag the node; 2 pointers
-  = pinch-zoom + pan; double-click = reset to identity. `bounds` stays viewport-derived (the
-  solver box is unchanged); zoom-out just reveals the surrounding space. When clearing the glow
-  layer on toggle-off, reset to identity first (`setTransform(1,0,0,1,0,0)`) or the clear
-  misses panned/zoomed regions.
+  = pinch-zoom + pan; double-click = re-engage auto-fit (below). When clearing the glow layer
+  on toggle-off, reset to identity first (`setTransform(1,0,0,1,0,0)`) or the clear misses
+  panned/zoomed regions.
+- **No layout container — the camera AUTO-FITS the graph.** There is no hard box clamping node
+  positions (the force solver's integrate clamp and the node-drag clamp were removed); the
+  solver lays out freely, kept cohesive by gravity (force) / the border cost term (annealing).
+  Each frame, while `state.cameraManual` is false, `autoFit()` eases the camera (scale + offset)
+  so the graph's bbox is framed in the **visible viewport — the canvas MINUS the open panel**
+  (so the graph centers in what you can see, not behind the panel; this is why there's no
+  separate "shift for the panel" hack). `fitTarget()` computes it; scale is clamped `[0.2, 2]`
+  so tiny graphs fill the view and big ones fit. Any manual pan/zoom/drag sets `cameraManual`
+  (so the view doesn't fight you / chase a dragged node); **a (re)build (`buildSolver`) or
+  double-click clears it** to re-frame. The ease has a deadband so it idles (no redraw) once
+  converged. `bounds` still exists as the solvers' world-space SCALE reference (idealK, gravity
+  center, layer gap, seeding) — it's just no longer a wall and no longer defines the view.
 - **Signal glow** (DISPLAY toggle `tg-glow`, off by default): an animated overlay on the
   dedicated `#glow-canvas` (`Renderer.drawGlowLayer`, repainted every frame). A glowing
   comet (bright head + gradient tail) eases along each edge's polyline by arc-length

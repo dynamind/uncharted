@@ -563,8 +563,8 @@ LayoutEngine.register("force", (graph, bounds, params) => {
         n.vy = n.vy * DAMP + n._dy * (1 - DAMP);
         const speed = Math.hypot(n.vx, n.vy) || 1e-9;
         const move = Math.min(speed * LR, temp);         // temp caps the actual travel
-        n.x = Geo.clamp(n.x + n.vx / speed * move, bounds.x0, bounds.x1);
-        n.y = Geo.clamp(n.y + n.vy / speed * move, bounds.y0, bounds.y1);
+        n.x += n.vx / speed * move;                       // no hard container — gravity keeps it
+        n.y += n.vy / speed * move;                       // cohesive; the camera auto-fits the result
       }
       temp *= 0.99;                           // cool (slow: leave the damped+LR dynamics time
                                               // to reach equilibrium before the freeze)
@@ -1150,8 +1150,12 @@ const App = (() => {
     bounds: { x0: 0, y0: 0, x1: 0, y1: 0 },
     // Camera: a pure VIEW layer. screen = world * scale + (x, y). The solver, routing and
     // crossing detection all stay in world space; only rendering (the ctx transform) and
-    // pointer math read the camera. scale 1 / offset 0 ⇒ identical to no camera at all.
+    // pointer math read the camera. There is NO layout container — the camera auto-fits the
+    // graph's bbox into the visible viewport every frame, until a manual pan/zoom/drag takes
+    // over (cameraManual), which a (re)build or double-click clears.
     camera: { x: 0, y: 0, scale: 1 },
+    cameraManual: false,
+    _panelW: 0,                                // cached panel width (for the auto-fit visible area)
   };
 
   function bounds() {
@@ -1186,8 +1190,42 @@ const App = (() => {
     const wx = (sx - cam.x) / cam.scale, wy = (sy - cam.y) / cam.scale;
     cam.x = sx - wx * ns; cam.y = sy - wy * ns; cam.scale = ns;
   }
+
+  // Auto-fit: frame the graph's bounding box inside the VISIBLE viewport (the canvas minus
+  // the open panel), easing the camera there each frame. Replaces the old hard layout box —
+  // the solver lays out freely and the view follows. Paused once cameraManual is set.
+  function fitTarget() {
+    const ns = state.graph.nodes;
+    if (!ns.length || !state.view.w) return null;
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const n of ns) {
+      const { hw, hh } = Nodes.half(n);
+      if (n.x - hw < x0) x0 = n.x - hw;  if (n.x + hw > x1) x1 = n.x + hw;
+      if (n.y - hh < y0) y0 = n.y - hh;  if (n.y + hh > y1) y1 = n.y + hh;
+    }
+    const bw = Math.max(1, x1 - x0), bh = Math.max(1, y1 - y0);
+    const cwx = (x0 + x1) / 2, cwy = (y0 + y1) / 2;            // bbox center, world
+    const collapsed = document.getElementById("app").classList.contains("collapsed");
+    const panelW = collapsed ? 0 : state._panelW;             // panel overlays the right
+    const pad = 56;
+    const visW = Math.max(60, state.view.w - panelW - 2 * pad);
+    const visH = Math.max(60, state.view.h - 2 * pad);
+    const scale = Geo.clamp(Math.min(visW / bw, visH / bh), 0.2, 2);
+    const vcx = (state.view.w - panelW) / 2, vcy = state.view.h / 2;   // visible-area center, screen
+    return { scale, x: vcx - cwx * scale, y: vcy - cwy * scale };
+  }
+  function autoFit() {
+    const t = fitTarget();
+    if (!t) return;
+    const cam = state.camera, k = 0.16;
+    const ds = t.scale - cam.scale, dx = t.x - cam.x, dy = t.y - cam.y;
+    if (Math.abs(dx) < 0.4 && Math.abs(dy) < 0.4 && Math.abs(ds) < 8e-4) return;   // converged → idle
+    cam.scale += ds * k; cam.x += dx * k; cam.y += dy * k;
+    cameraMoved();
+  }
   function resize() {
     fitCanvas();
+    state._panelW = document.getElementById("side").offsetWidth;   // cache for the auto-fit area
     state.bounds = bounds();
     invalidate();                         // bounds changed → also re-route (orthogonal A*) + remetric
   }
@@ -1206,6 +1244,7 @@ const App = (() => {
   function buildSolver() {
     state.solver = LayoutEngine.create(state.solverName, state.graph, state.bounds, state.params);
     state._prevSides = null;          // fresh layout → fresh routing (drop hysteresis memory)
+    state.cameraManual = false;       // a fresh solve re-engages auto-fit (double-click also does)
     document.getElementById("hud-solver").textContent = state.solverName;
   }
 
@@ -1288,6 +1327,7 @@ const App = (() => {
         state.solver.step();
       }
     }
+    if (!state.cameraManual) autoFit();    // frame the graph into the visible viewport
     recompute();
 
     // static scene: repaint only when geometry/display changed (cheap when idle)
@@ -1388,16 +1428,16 @@ const App = (() => {
       const [a, b] = twoPointers(), d = dist(a, b) || 1, m = mid(a, b), r = canvas.getBoundingClientRect();
       zoomAround(m.x - r.left, m.y - r.top, d / pinch.d);
       state.camera.x += m.x - pinch.m.x; state.camera.y += m.y - pinch.m.y;
-      pinch.d = d; pinch.m = m; cameraMoved();
+      pinch.d = d; pinch.m = m; state.cameraManual = true; cameraMoved();
       return;
     }
     if (drag) {
       const p = ptr(e);
-      drag.x = Geo.clamp(p.x, state.bounds.x0, state.bounds.x1);
-      drag.y = Geo.clamp(p.y, state.bounds.y0, state.bounds.y1);
+      drag.x = p.x; drag.y = p.y;                 // free placement (no container) + don't chase
+      state.cameraManual = true;                  // ...the dragged node with the auto-fit camera
     } else if (pan) {
       state.camera.x += e.clientX - pan.x; state.camera.y += e.clientY - pan.y;
-      pan = { x: e.clientX, y: e.clientY }; cameraMoved();
+      pan = { x: e.clientX, y: e.clientY }; state.cameraManual = true; cameraMoved();
     }
   });
   function endPointer(e) {
@@ -1416,12 +1456,11 @@ const App = (() => {
     const s = stagePt(e);
     if (e.ctrlKey || e.metaKey) zoomAround(s.x, s.y, Math.exp(-e.deltaY * 0.005)); // pinch / ⌘-scroll
     else { state.camera.x -= e.deltaX; state.camera.y -= e.deltaY; }                 // 2-finger pan
-    cameraMoved();
+    state.cameraManual = true; cameraMoved();
   }, { passive: false });
 
-  canvas.addEventListener("dblclick", () => {
-    state.camera.x = 0; state.camera.y = 0; state.camera.scale = 1; cameraMoved();
-  });
+  // double-click re-engages auto-fit (re-frames the graph in the visible viewport)
+  canvas.addEventListener("dblclick", () => { state.cameraManual = false; });
 
   /* -------- UI wiring -------- */
   function wire() {
