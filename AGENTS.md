@@ -28,12 +28,13 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
 - `src/router.js` is **pure / DOM-free** (Geo, Nodes, ORTHO, sidesForEdge,
   orthogonalGeometry, edgeGeometry). Keep the router pure so the tests stay fast and
   trustworthy.
-- **Modularization (in progress):** we are decomposing the rendering pipeline into
-  small, pluggable modules behind interfaces (ports-and-adapters), each with its own
-  registry, so alternative implementations can be added and unit-tested in isolation.
-  Vite (`vite-plugin-singlefile`) still inlines the whole module graph, so the
-  single-file deliverable is unaffected. The remaining app glue stays inline in
-  `index.html`'s `<script type="module">` until it is extracted.
+- **Modularization:** the rendering pipeline (graphs, paths, ports, renderers, shapers,
+  arrows, crossings) AND the layout solvers are decomposed into small, pluggable modules
+  behind interfaces (ports-and-adapters), each with its own registry, so alternative
+  implementations can be added and unit-tested in isolation. Vite (`vite-plugin-singlefile`)
+  still inlines the whole module graph, so the single-file deliverable is unaffected. The
+  remaining app glue (state, UI wiring, rendering loop, camera) stays inline in
+  `index.html`'s `<script type="module">`.
 - **Graph sources** live under `src/graphs/`. A `GraphSource` is
   `{ id, label, build() → {nodes, edges}, prefer? }`; `prefer` (`{solver?, routing?,
   arrows?}`) declares the UI defaults that source shines with (e.g. DAGs prefer
@@ -55,12 +56,25 @@ The project is now a small **Vite** app so the routing logic can be unit-tested.
 
 ## Architecture / invariants
 
-- `LayoutEngine` is the **facade**. Public surface: `LayoutEngine.create(graph, opts)`
-  returns a *solver instance* exposing `step()` (advance one iteration, mutate node
-  positions in place) and `done`. This iterative interface is what makes the solving
-  *visible*; a batch backend like ELK would wrap its result behind the same seam.
-- Solvers register themselves into `LayoutEngine.solvers[name]`. Adding a solver =
-  add one entry; nothing else needs to know.
+- **Solvers** live under `src/solvers/` (same registry pattern as graphs/paths/ports/
+  renderers/shapers/crossings/arrows). A `Solver` is `{ id, create(graph, bounds, params)
+  → instance }`; the returned *solver instance* exposes `step()` (advance one iteration,
+  mutate node positions in place) and `done`. This iterative interface is what makes the
+  solving *visible*; a batch backend like ELK would wrap its result behind the same seam.
+  Each solver self-registers via `src/solvers/registry.js` (`registerSolver`/`solvers()`/
+  `getSolver(id)`, a standalone registry module so files can self-register without a
+  circular-import TDZ); `src/solvers/index.js` side-effect-imports them and re-exports the
+  registry accessors. `annealing.js` registers both `annealing` and `hillclimb` from one
+  file since they're two parameterizations (`greedy` flag) of the same closure, not
+  independently-implemented algorithms — unlike the rest of the registries, where one file
+  is one implementation. `layered.js` and `circular.js` share a `constructive.js` tween
+  helper (`makeConstructive`) since both compute target positions up front and ease into
+  them, mirroring how a batch backend (Dagre, ELK) works. Adding a solver = drop a file
+  that calls `registerSolver()` + one import line in `index.js`; nothing else needs to know.
+- **Objective** (`src/objective.js`) is the combinatorial cost the solvers fight against —
+  pure and DOM-free like `router.js`, importing only `Geo`/`Nodes` from it. Not a registry:
+  nothing else implements a second Objective, but it's a shared pure dependency the force
+  and annealing solvers need (`idealK`, `minDist`), same role as `Geo`/`Nodes` for routing.
 - Graph model: `{ nodes: [{id, x, y, shape?, w?, h?, label?, ...}], edges: [{source, target}] }`.
   `source`/`target` are node indices. Nodes default to circles; flowchart nodes set
   `shape: "rect"|"diamond"` + `w,h,label`. `Nodes` helper does size/border/hit-testing.
@@ -371,15 +385,20 @@ approximates it physically; constructive solvers (layered/circular) target struc
   tunable cost-weight + cooling sliders; per-solver explainer; node dragging; keyboard
   (space/S/R); 9 presets (incl. `spindle` — the fan-out/fan-in port-distribution fixture).
   Verified in-browser (Claude Preview), no console errors.
+- **Solvers + Objective extracted to `src/solvers/` / `src/objective.js`** (ports-and-adapters,
+  same as graphs/paths/ports/renderers/shapers/crossings/arrows) — pure and unit-tested
+  (`test/solvers.test.js`), no longer inline in `index.html`.
 - **Orthogonal routing is mature** (this is where most recent effort went): bend-minimized
   side choice on BOTH ends, 1-bend L / bottom-to-side, U-turns for tight wedges, fan-order
   ports (no sibling crossings), A* seeded with the stub direction, grid-quantised length
   (no flicker), **hysteresis** (sticky + drag-steerable), and **channel separation**
   (`separateLanes` — co-running edges fanned into parallel tracks; verified in-browser on
-  K₆). All pinned by 38 Vitest tests
-  in `test/router.test.js` — the single best place to understand the routing contract.
-  Run `npm test`. After ANY router change, also `npm run build` and check it stays a single
-  file (`grep -c '<script src' dist/index.html` == 0).
+  K₆). All pinned by 30 Vitest tests
+  in `test/router.test.js` — the single best place to understand the routing contract
+  (arrowhead geometry has its own `test/arrows.test.js`, same pattern as
+  crossings/ports/renderers/shapers). Run `npm test`. After ANY router change, also
+  `npm run build` and check it stays a single file (`grep -c '<script src' dist/index.html`
+  == 0).
 - The length term penalises |len − k| (deviation from ideal), NOT raw length —
   raw length made SA collapse the graph to a point. Do not regress this.
 - **An edge through a non-incident node counts as a crossing** (`Nodes.segHitsBody`,
@@ -426,7 +445,8 @@ edges, and angle-vs-chord tests never caught it. So:
   - **skip** (return null) when the edge is shorter than the glyph (`span(poly[0],poly[last]) <
     back`) — no tiny/overrunning arrows on near-touching nodes.
 The key test sweeps angle × distance × bulge and asserts the base is within 1px of the polyline
-(not just an angle). 38 router tests.
+(not just an angle). 9 tests in `test/arrows.test.js` (exercises `getArrowEngine("default")`
+directly, not the `arrowHeading` router wrapper).
 
 The `layered` solver places a node in one layer per longest-path rank, but an edge that
 spans more than one layer is drawn as a single long line straight across the intervening
@@ -437,7 +457,7 @@ them in the barycenter phase like real nodes, then routes the edge through their
 (and Brandes–Köpf for the x-coords). Add dummy-node insertion to `layered` so long edges
 bend through their layers instead of cutting across, and the crossing count drops.
 
-Where: the `layered` solver (inline in `index.html`). Keep it behind the existing solver
+Where: the `layered` solver (`src/solvers/layered.js`). Keep it behind the existing solver
 seam. Orthogonal routing already polylines around obstacles, so the win is clearest with
 curved/straight routing and in the crossing metric. This is the biggest remaining gap to a
 "real" Dagre/ELK-class layered layout.
