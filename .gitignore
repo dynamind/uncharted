@@ -13,3 +13,6 @@ dist/
 # Claude workspace
 .claude/
 scratchpad/
+
+# Project
+/deploy
